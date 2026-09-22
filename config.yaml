@@ -1,0 +1,24 @@
+tickers:
+  - symbol: RELIANCE.NS
+    company: "Reliance Industries"
+  - symbol: TCS.NS
+    company: "Tata Consultancy Services"
+  - symbol: HDFCBANK.NS
+    company: "HDFC Bank"
+  - symbol: INFY.NS
+    company: "Infosys"
+  - symbol: ICICIBANK.NS
+    company: "ICICI Bank"
+
+paths:
+  db_path: "data/market_pred.db"
+
+price_ingestion:
+  history_start: "2018-01-01"
+  backfill_buffer_days: 5
+
+news_ingestion:
+  lookback_days: 29
+  page_size: 100
+  max_pages_per_ticker: 3
+  max_requests_per_run: 90
