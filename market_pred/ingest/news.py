@@ -7,6 +7,8 @@ also produces NormalizedArticle objects, without touching storage/dedup/CLI.
 from __future__ import annotations
 
 import logging
+import math
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -48,6 +50,30 @@ class NewsApiAuthError(NewsApiError):
     """An unrecoverable auth failure -- caller should stop the whole run."""
 
 
+class NewsApiDateRangeError(NewsApiError):
+    """The requested `from` date is older than the plan allows (HTTP 426).
+
+    NewsAPI's actual allowed lookback isn't fixed/documented reliably, so instead
+    of hardcoding a guess we parse the earliest allowed date out of its own error
+    message and let the caller retry with that date.
+    """
+
+    _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.api_message = message
+
+    def earliest_allowed_date(self) -> date | None:
+        match = self._DATE_RE.search(self.api_message)
+        if not match:
+            return None
+        try:
+            return datetime.strptime(match.group(), "%Y-%m-%d").date()
+        except ValueError:
+            return None
+
+
 def build_query(ticker: str, company: str) -> str:
     bare_symbol = ticker.split(".")[0]
     return f'"{company}" OR {bare_symbol}'
@@ -72,7 +98,20 @@ def _query_newsapi(
     if resp.status_code == 429:
         raise NewsApiError("NewsAPI rate limit hit (429)")
     if resp.status_code == 426:
-        raise NewsApiError("NewsAPI rejected the date range (426) -- free tier lookback exceeded")
+        try:
+            message = resp.json().get("message", resp.text)
+        except ValueError:
+            message = resp.text
+        raise NewsApiDateRangeError(message)
+    if resp.status_code == 400:
+        # Covers, among other things, the free Developer plan's cap on *total*
+        # accessible results per query (100, regardless of what totalResults
+        # reports) -- paging past that returns this rather than a clean 426.
+        try:
+            message = resp.json().get("message", resp.text)
+        except ValueError:
+            message = resp.text
+        raise NewsApiError(f"NewsAPI rejected the request (400): {message}")
     resp.raise_for_status()
     return resp.json()
 
@@ -124,8 +163,22 @@ def fetch_news_for_ticker(
     articles: list[NormalizedArticle] = []
     requests_used = 0
 
-    for page in range(1, max_pages + 1):
-        payload = _query_newsapi(query, from_date, to_date, api_key, page, page_size)
+    # The free Developer plan caps *total* accessible results per query at 100
+    # regardless of what totalResults reports -- requesting further pages errors
+    # out, so never ask for a page whose offset would exceed that ceiling.
+    effective_max_pages = min(max_pages, math.ceil(100 / page_size)) if page_size else max_pages
+
+    for page in range(1, effective_max_pages + 1):
+        try:
+            payload = _query_newsapi(query, from_date, to_date, api_key, page, page_size)
+        except NewsApiAuthError:
+            raise
+        except NewsApiError as e:
+            if page == 1:
+                raise
+            # Keep whatever earlier pages already returned instead of discarding it.
+            logger.warning("%s: stopping pagination at page %d: %s", ticker, page, e)
+            break
         requests_used += 1
 
         raw_articles = payload.get("articles", [])
@@ -166,19 +219,42 @@ def run(tickers: list[str] | None = None) -> None:
                 )
                 break
 
-            try:
-                last_pub = get_last_news_date(conn, info.symbol)
-                from_date = min_from_date if last_pub is None else max(min_from_date, last_pub.date())
+            last_pub = get_last_news_date(conn, info.symbol)
+            from_date = min_from_date if last_pub is None else max(min_from_date, last_pub.date())
 
-                articles, requests_used = fetch_news_for_ticker(
-                    ticker=info.symbol,
-                    company=info.company,
-                    from_date=from_date,
-                    to_date=today,
-                    api_key=api_key,
-                    page_size=settings.news_page_size,
-                    max_pages=settings.news_max_pages_per_ticker,
-                )
+            try:
+                try:
+                    articles, requests_used = fetch_news_for_ticker(
+                        ticker=info.symbol,
+                        company=info.company,
+                        from_date=from_date,
+                        to_date=today,
+                        api_key=api_key,
+                        page_size=settings.news_page_size,
+                        max_pages=settings.news_max_pages_per_ticker,
+                    )
+                except NewsApiDateRangeError as e:
+                    # Our configured lookback assumption was more generous than what
+                    # NewsAPI's plan actually allows right now -- parse the real cutoff
+                    # out of its error message and retry once with that date instead.
+                    allowed = e.earliest_allowed_date()
+                    if allowed is None or allowed <= from_date:
+                        raise
+                    logger.warning(
+                        "%s: NewsAPI's free-tier lookback is shorter than configured "
+                        "(news_lookback_days=%d) -- retrying from %s instead of %s",
+                        info.symbol, settings.news_lookback_days, allowed, from_date,
+                    )
+                    requests_used_total += 1  # the rejected request still counted against quota
+                    articles, requests_used = fetch_news_for_ticker(
+                        ticker=info.symbol,
+                        company=info.company,
+                        from_date=allowed,
+                        to_date=today,
+                        api_key=api_key,
+                        page_size=settings.news_page_size,
+                        max_pages=settings.news_max_pages_per_ticker,
+                    )
                 requests_used_total += requests_used
 
                 n_inserted = insert_news_articles(conn, articles)
