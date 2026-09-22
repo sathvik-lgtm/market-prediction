@@ -80,10 +80,21 @@ def build_query(ticker: str, company: str) -> str:
 
 
 def _query_newsapi(
-    query: str, from_date: date, to_date: date, api_key: str, page: int, page_size: int
+    query: str,
+    from_date: date,
+    to_date: date,
+    api_key: str,
+    page: int,
+    page_size: int,
+    domains: str | None = None,
 ) -> dict:
     params = {
-        "q": query,
+        # qInTitle (not q) -- q matches anywhere in an article's full body text
+        # across NewsAPI's entire source index, which is dominated by non-financial
+        # content. A bare ticker/acronym like "TCS" or "INFY" then collides with
+        # unrelated uses (car "Traction Control System", a PyPI package, etc.).
+        # Restricting to the headline is far more precise.
+        "qInTitle": query,
         "from": from_date.isoformat(),
         "to": to_date.isoformat(),
         "language": "en",
@@ -92,6 +103,8 @@ def _query_newsapi(
         "page": page,
         "apiKey": api_key,
     }
+    if domains:
+        params["domains"] = domains
     resp = requests.get(NEWSAPI_URL, params=params, timeout=30)
     if resp.status_code == 401:
         raise NewsApiAuthError("NewsAPI rejected the request (401) -- check NEWSAPI_KEY in .env")
@@ -155,6 +168,7 @@ def fetch_news_for_ticker(
     api_key: str,
     page_size: int = 100,
     max_pages: int = 3,
+    domains: str | None = None,
 ) -> tuple[list[NormalizedArticle], int]:
     """Fetch and normalize articles for one ticker. Returns (articles, requests_used)."""
     query = build_query(ticker, company)
@@ -170,7 +184,7 @@ def fetch_news_for_ticker(
 
     for page in range(1, effective_max_pages + 1):
         try:
-            payload = _query_newsapi(query, from_date, to_date, api_key, page, page_size)
+            payload = _query_newsapi(query, from_date, to_date, api_key, page, page_size, domains)
         except NewsApiAuthError:
             raise
         except NewsApiError as e:
@@ -207,6 +221,7 @@ def run(tickers: list[str] | None = None) -> None:
     # rather than reacting to the 426 the API returns for an out-of-range request.
     min_from_date = today - timedelta(days=settings.news_lookback_days)
     requests_used_total = 0
+    domains = ",".join(settings.news_domains) if settings.news_domains else None
 
     with get_connection(settings.db_path) as conn:
         init_db(conn)
@@ -232,6 +247,7 @@ def run(tickers: list[str] | None = None) -> None:
                         api_key=api_key,
                         page_size=settings.news_page_size,
                         max_pages=settings.news_max_pages_per_ticker,
+                        domains=domains,
                     )
                 except NewsApiDateRangeError as e:
                     # Our configured lookback assumption was more generous than what
@@ -254,6 +270,7 @@ def run(tickers: list[str] | None = None) -> None:
                         api_key=api_key,
                         page_size=settings.news_page_size,
                         max_pages=settings.news_max_pages_per_ticker,
+                        domains=domains,
                     )
                 requests_used_total += requests_used
 

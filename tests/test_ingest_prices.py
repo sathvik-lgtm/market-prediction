@@ -42,6 +42,7 @@ def _fake_settings(db_path):
         news_page_size=100,
         news_max_pages_per_ticker=3,
         news_max_requests_per_run=90,
+        news_domains=[],
     )
 
 

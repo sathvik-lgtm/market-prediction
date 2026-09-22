@@ -29,6 +29,7 @@ class Settings:
     news_page_size: int
     news_max_pages_per_ticker: int
     news_max_requests_per_run: int
+    news_domains: list[str]
 
     def get_newsapi_key(self) -> str:
         key = os.environ.get("NEWSAPI_KEY")
@@ -62,4 +63,5 @@ def get_settings(config_path: str | Path = REPO_ROOT / "config.yaml") -> Setting
         news_page_size=int(news_cfg["page_size"]),
         news_max_pages_per_ticker=int(news_cfg["max_pages_per_ticker"]),
         news_max_requests_per_run=int(news_cfg["max_requests_per_run"]),
+        news_domains=list(news_cfg.get("domains", [])),
     )

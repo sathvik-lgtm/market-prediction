@@ -89,6 +89,18 @@ forward rule (attributing a headline to the next tradeable session it could actu
 influenced) can be applied during feature engineering in a later phase — that rule is
 deliberately not baked into storage now.
 
+## News query design
+
+Articles are matched by `qInTitle` (headline only, not full article body) restricted to
+a curated allowlist of Indian financial news domains (`config.yaml`'s
+`news_ingestion.domains`), not NewsAPI's full ~150,000-source index. Both choices exist
+because searching full article content across all domains initially made bare ticker
+symbols collide with unrelated uses — e.g. "TCS" matched car reviews ("Traction Control
+System") and even a PyPI package release, and "RELIANCE" matched any article using the
+common English word "reliance". Restricting to financial-press domains and headline-only
+matching eliminates nearly all of that noise while keeping recall of genuinely
+company-specific headlines.
+
 ## Known limitations
 
 - **NewsAPI free tier**: the "Developer" plan only returns articles from roughly the last
@@ -96,6 +108,10 @@ deliberately not baked into storage now.
   run cannot be recovered. Run `refresh` regularly (e.g. a daily scheduled task) to
   accumulate news history over time — price history will span years while news history
   starts short and grows from here.
+- **NewsAPI's actual date-range cutoff and per-query result cap are enforced by the API,
+  not just documented values.** The pipeline handles both automatically: a 426 (lookback
+  exceeded) is retried once with the cutoff date NewsAPI's own error message reports, and
+  pagination never requests past the ~100-result-per-query ceiling the free tier enforces.
 - `yfinance` is an unofficial wrapper around Yahoo Finance endpoints with no SLA; it can
   break without notice if Yahoo changes its API.
 - A second news source could be added later without a rewrite: `ingest/news.py`'s

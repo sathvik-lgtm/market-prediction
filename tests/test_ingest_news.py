@@ -58,6 +58,28 @@ def test_fetch_news_for_ticker_normalizes_and_stops_pagination(monkeypatch):
     assert articles[0].published_date_ist == "2024-01-02"  # 10:00 UTC -> 15:30 IST, same day
 
 
+def test_fetch_news_for_ticker_searches_titles_only_and_passes_domains(monkeypatch):
+    payload = make_newsapi_payload([make_raw_article()])
+    captured = {}
+
+    def fake_get(url, params, timeout):
+        captured.update(params)
+        return FakeResponse(200, payload)
+
+    monkeypatch.setattr(news_ingest.requests, "get", fake_get)
+
+    news_ingest.fetch_news_for_ticker(
+        ticker="RELIANCE.NS", company="Reliance Industries",
+        from_date=date(2024, 1, 1), to_date=date(2024, 1, 10),
+        api_key="fake-key", page_size=100, max_pages=3,
+        domains="moneycontrol.com,livemint.com",
+    )
+
+    assert captured["qInTitle"] == '"Reliance Industries" OR RELIANCE'
+    assert "q" not in captured
+    assert captured["domains"] == "moneycontrol.com,livemint.com"
+
+
 def test_fetch_news_for_ticker_never_pages_past_the_free_tier_result_cap(monkeypatch):
     payload = make_newsapi_payload([make_raw_article()])
     payload["totalResults"] = 250  # far more than the free tier can actually page through
@@ -155,6 +177,7 @@ def _fake_settings(db_path):
         news_page_size=100,
         news_max_pages_per_ticker=3,
         news_max_requests_per_run=90,
+        news_domains=["example-financial-news.com"],
     )
 
 

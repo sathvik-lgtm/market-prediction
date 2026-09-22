@@ -22,3 +22,15 @@ news_ingestion:
   page_size: 100
   max_pages_per_ticker: 3
   max_requests_per_run: 90
+  # Restrict to known Indian financial press. Without this, NewsAPI's /everything
+  # search spans its entire 150,000+ source index (academic journals, product
+  # listings, automotive reviews, etc.) and bare ticker symbols like "TCS" or
+  # "INFY" collide with unrelated acronyms/product names in totally unrelated domains.
+  domains:
+    - moneycontrol.com
+    - economictimes.indiatimes.com
+    - livemint.com
+    - business-standard.com
+    - ndtvprofit.com
+    - financialexpress.com
+    - cnbctv18.com
