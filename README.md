@@ -3,16 +3,19 @@
 Predicts short-term price direction (up/down) for NSE-listed Indian stocks by combining
 financial news sentiment with historical price/technical data.
 
-**Status: Phase 1 of 5 (Data Pipeline).** This phase covers data acquisition only —
-price ingestion, news ingestion, and storage. Sentiment scoring (FinBERT), predictive
-modeling, and the Streamlit dashboard are later phases and are not implemented yet.
+**Status: Phase 2 of 5 (Sentiment Modeling).** Data acquisition (price/news ingestion)
+and sentiment scoring (a self-fine-tuned FinBERT) are implemented. Predictive modeling
+and the Streamlit dashboard are later phases and are not implemented yet.
 
-## Tech stack (Phase 1)
+## Tech stack (Phases 1-2)
 
 - Python
 - [`yfinance`](https://pypi.org/project/yfinance/) — historical daily OHLCV price data
 - [NewsAPI](https://newsapi.org/) — news headlines per ticker
 - SQLite — storage, via a thin data access layer in `market_pred/db/access.py`
+- [VADER](https://github.com/cjhutto/vaderSentiment) — rule-based sentiment baseline
+- [`transformers`](https://huggingface.co/docs/transformers)/`torch` — FinBERT fine-tuning and inference
+- [Financial PhraseBank](https://huggingface.co/datasets/gtfintechlab/financial_phrasebank_sentences_allagree) — labeled dataset used to fine-tune FinBERT
 
 ## Setup
 
@@ -40,14 +43,36 @@ python -m market_pred.pipeline refresh
 ```
 
 This creates `data/market_pred.db` if it doesn't exist, then fetches/upserts price
-history and news headlines for the 5 tickers configured in `config.yaml`.
+history and news headlines for the 5 tickers configured in `config.yaml`. If a
+fine-tuned sentiment model already exists (see below), `refresh` also scores any new
+headlines automatically.
 
-### Try it without a NewsAPI key
+### Try it without a NewsAPI key or training a model
 
-A small demo dataset is committed at `data/seed/`. To load it into a fresh local DB:
+A small demo dataset — including already-scored news and computed daily sentiment — is
+committed at `data/seed/`. To load it into a fresh local DB:
 
 ```powershell
 python scripts/load_seed_data.py
+```
+
+### Fine-tune the sentiment model
+
+One-time step, not part of the regular `refresh` cycle (CPU fine-tuning takes ~20
+minutes on this dataset size):
+
+```powershell
+python -m market_pred.pipeline train-sentiment
+```
+
+Fine-tunes `yiyanghkust/finbert-pretrain` (BERT further pretrained on financial text,
+with no classification head yet) on the [Financial PhraseBank](https://huggingface.co/datasets/gtfintechlab/financial_phrasebank_sentences_allagree)
+dataset, and saves the result to `models/finbert_finetuned/final` (gitignored — model
+weights don't belong in git; re-run this to reproduce). After training, score the
+actual news headlines and recompute daily aggregates:
+
+```powershell
+python -m market_pred.pipeline sentiment
 ```
 
 ## Usage
@@ -58,11 +83,15 @@ python -m market_pred.pipeline prices                               # fetch/upse
 python -m market_pred.pipeline prices --tickers RELIANCE.NS TCS.NS  # subset of tickers
 python -m market_pred.pipeline prices --full-refresh                # refetch full history
 python -m market_pred.pipeline news                                 # fetch/insert news, all tickers
-python -m market_pred.pipeline refresh                               # prices + news
+python -m market_pred.pipeline refresh                               # prices + news + sentiment (if trained)
+python -m market_pred.pipeline train-sentiment                      # fine-tune FinBERT (one-time, ~20 min on CPU)
+python -m market_pred.pipeline sentiment                            # score unscored headlines + recompute aggregates
+python -m market_pred.pipeline evaluate-sentiment                   # VADER vs off-the-shelf vs fine-tuned comparison
 ```
 
 All commands are safe to re-run: price upserts are idempotent (keyed on `ticker, date`),
-and news inserts are deduplicated (keyed on `ticker, url`).
+news inserts are deduplicated (keyed on `ticker, url`), and sentiment scoring only
+processes headlines that don't have a score yet.
 
 To regenerate the committed demo snapshot from your local DB:
 
@@ -89,6 +118,18 @@ forward rule (attributing a headline to the next tradeable session it could actu
 influenced) can be applied during feature engineering in a later phase — that rule is
 deliberately not baked into storage now.
 
+**Sentiment columns on `news`** (added in Phase 2, nullable until scored):
+`vader_score` (VADER compound score, -1 to 1), `finbert_label`
+(negative/neutral/positive), `finbert_score` (signed: p_positive - p_negative, -1 to 1),
+`finbert_confidence` (probability of the predicted label), `sentiment_scored_at`
+(NULL = not yet scored; this is how the scoring pipeline finds unscored rows).
+
+**`daily_sentiment`** — one row per `(ticker, date)`, aggregated from all *scored*
+`news` rows sharing that `published_date_ist`: `mean_finbert_score`, `mean_vader_score`,
+`article_count`, `computed_at`. Same lookahead-bias caveat as `published_date_ist`
+applies here — this is a plain calendar-day aggregate, not yet joined to any price
+target.
+
 ## News query design
 
 Articles are matched by `qInTitle` (headline only, not full article body) restricted to
@@ -100,6 +141,41 @@ System") and even a PyPI package release, and "RELIANCE" matched any article usi
 common English word "reliance". Restricting to financial-press domains and headline-only
 matching eliminates nearly all of that noise while keeping recall of genuinely
 company-specific headlines.
+
+## Sentiment model
+
+Three sentiment scorers exist, in increasing order of sophistication:
+
+1. **VADER** — rule-based, no training, used only as a floor/benchmark.
+2. **`ProsusAI/finbert`** (off-the-shelf) — already fine-tuned on Financial PhraseBank
+   by its authors, used only as an evaluation comparison point, not in the regular
+   scoring pipeline.
+3. **Our own fine-tuned FinBERT** (used in the actual pipeline) — starts from
+   [`yiyanghkust/finbert-pretrain`](https://huggingface.co/yiyanghkust/finbert-pretrain),
+   a BERT further pretrained on a large financial corpus (10-K/8-K filings, earnings
+   calls, analyst reports) but with **no classification head yet**. Fine-tuning
+   `ProsusAI/finbert` again on the same Financial PhraseBank data it was already
+   trained on would be redundant — this base model exists specifically so people
+   fine-tune it themselves, which is what `market_pred/sentiment/train.py` does: a
+   3-class head trained via HF `Trainer` on an 80/10/10-equivalent train/validation/test
+   split (validation carved out of the training set with stratified sampling; the
+   dataset's own test split stays fully held out).
+
+**Evaluation** (`python -m market_pred.pipeline evaluate-sentiment`), all three scorers
+on the same held-out Financial PhraseBank test split (680 examples, never touched
+during training):
+
+| Model | Accuracy | Macro F1 |
+|---|---|---|
+| VADER (rule-based baseline) | 56.2% | 48.4% |
+| ProsusAI/finbert (off-the-shelf) | 97.1% | 96.0% |
+| **Our fine-tuned FinBERT** | **96.6%** | **95.7%** |
+
+Our fine-tuned model performs essentially on par with the professionally fine-tuned
+off-the-shelf FinBERT (well within noise given the test set's class imbalance: 93
+negative / 417 neutral / 170 positive), and both dramatically outperform the rule-based
+baseline — validating that the fine-tuning pipeline itself is sound, not just that
+"FinBERT is good."
 
 ## Known limitations
 
@@ -117,6 +193,17 @@ company-specific headlines.
 - A second news source could be added later without a rewrite: `ingest/news.py`'s
   `fetch_news_for_ticker` always returns a list of source-agnostic `NormalizedArticle`
   objects, so storage, dedup, and the CLI wouldn't need to change.
+- **Sentiment coverage is sparse relative to price history.** Price history spans
+  2018-present (~2,159 trading days/ticker); news — and therefore `daily_sentiment` —
+  only covers the last ~29 days per NewsAPI's free-tier lookback, growing forward from
+  whenever `refresh` starts running regularly. A later phase's feature engineering will
+  need a strategy for the vast majority of price history having no sentiment signal
+  (e.g. training/evaluating only on the overlapping window, or treating missing days as
+  neutral) — not solved here, just flagged so it isn't a surprise.
+- The Financial PhraseBank test-set evaluation measures sentiment classification
+  quality on analyst-style sentences, not on our actual NSE headlines (which have no
+  ground-truth sentiment labels to evaluate against) — a proxy, not a direct measure of
+  how well it scores our specific data.
 
 ## Running tests
 

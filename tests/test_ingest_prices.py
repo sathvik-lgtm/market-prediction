@@ -1,11 +1,9 @@
-from datetime import date
-
 import pandas as pd
 
-from market_pred.config import Settings, TickerInfo
 from market_pred.db.access import get_price_history
 from market_pred.db.connection import get_connection
 from market_pred.ingest import prices as prices_ingest
+from tests.conftest import make_settings
 
 
 def make_raw_history_df():
@@ -32,22 +30,8 @@ def test_clean_price_df_handles_empty_input():
     assert prices_ingest.clean_price_df(pd.DataFrame()).empty
 
 
-def _fake_settings(db_path):
-    return Settings(
-        tickers=[TickerInfo(symbol="TEST.NS", company="Test Co")],
-        db_path=db_path,
-        price_history_start=date(2024, 1, 1),
-        price_backfill_buffer_days=5,
-        news_lookback_days=29,
-        news_page_size=100,
-        news_max_pages_per_ticker=3,
-        news_max_requests_per_run=90,
-        news_domains=[],
-    )
-
-
 def test_run_upserts_fetched_prices(tmp_path, monkeypatch):
-    settings = _fake_settings(tmp_path / "test.db")
+    settings = make_settings(tmp_path / "test.db")
     monkeypatch.setattr(prices_ingest, "get_settings", lambda: settings)
     monkeypatch.setattr(
         prices_ingest, "fetch_price_history", lambda ticker, start, end: make_raw_history_df()
@@ -61,7 +45,7 @@ def test_run_upserts_fetched_prices(tmp_path, monkeypatch):
 
 
 def test_run_skips_ticker_on_empty_response(tmp_path, monkeypatch):
-    settings = _fake_settings(tmp_path / "test.db")
+    settings = make_settings(tmp_path / "test.db")
     monkeypatch.setattr(prices_ingest, "get_settings", lambda: settings)
     monkeypatch.setattr(prices_ingest, "fetch_price_history", lambda ticker, start, end: pd.DataFrame())
 

@@ -2,10 +2,10 @@ from datetime import date, timedelta
 
 import pytest
 
-from market_pred.config import Settings, TickerInfo
 from market_pred.db.access import get_news_for_ticker
 from market_pred.db.connection import get_connection
 from market_pred.ingest import news as news_ingest
+from tests.conftest import make_settings
 
 
 class FakeResponse:
@@ -168,17 +168,7 @@ def test_query_newsapi_raises_date_range_error_on_426(monkeypatch):
 
 
 def _fake_settings(db_path):
-    return Settings(
-        tickers=[TickerInfo(symbol="TEST.NS", company="Test Co")],
-        db_path=db_path,
-        price_history_start=date(2024, 1, 1),
-        price_backfill_buffer_days=5,
-        news_lookback_days=29,
-        news_page_size=100,
-        news_max_pages_per_ticker=3,
-        news_max_requests_per_run=90,
-        news_domains=["example-financial-news.com"],
-    )
+    return make_settings(db_path, news_domains=["example-financial-news.com"])
 
 
 def test_run_inserts_articles_and_dedups_across_runs(tmp_path, monkeypatch):
