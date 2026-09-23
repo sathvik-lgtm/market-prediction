@@ -4,6 +4,9 @@
     python -m market_pred.pipeline prices [--tickers RELIANCE.NS TCS.NS] [--full-refresh]
     python -m market_pred.pipeline news [--tickers RELIANCE.NS TCS.NS]
     python -m market_pred.pipeline refresh
+    python -m market_pred.pipeline train-sentiment
+    python -m market_pred.pipeline sentiment
+    python -m market_pred.pipeline evaluate-sentiment
 """
 from __future__ import annotations
 
@@ -15,6 +18,9 @@ from market_pred.db.connection import get_connection
 from market_pred.db.schema import init_db
 from market_pred.ingest import news as news_ingest
 from market_pred.ingest import prices as prices_ingest
+from market_pred.sentiment import evaluate as sentiment_evaluate
+from market_pred.sentiment import run as sentiment_run
+from market_pred.sentiment import train as sentiment_train
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +43,26 @@ def cmd_news(args: argparse.Namespace) -> None:
 def cmd_refresh(args: argparse.Namespace) -> None:
     prices_ingest.run(tickers=args.tickers)
     news_ingest.run(tickers=args.tickers)
+    settings = get_settings()
+    if (settings.sentiment_model_dir / "final").exists():
+        sentiment_run.run()
+    else:
+        logger.info(
+            "No fine-tuned sentiment model yet -- skipping sentiment scoring "
+            "(run `train-sentiment` first)"
+        )
+
+
+def cmd_train_sentiment(_args: argparse.Namespace) -> None:
+    sentiment_train.run()
+
+
+def cmd_sentiment(_args: argparse.Namespace) -> None:
+    sentiment_run.run()
+
+
+def cmd_evaluate_sentiment(_args: argparse.Namespace) -> None:
+    sentiment_evaluate.run()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -58,6 +84,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_refresh = subparsers.add_parser("refresh", help="Run prices + news ingestion")
     p_refresh.add_argument("--tickers", nargs="+", default=None, help="Subset of tickers to fetch")
     p_refresh.set_defaults(func=cmd_refresh)
+
+    p_train_sentiment = subparsers.add_parser(
+        "train-sentiment", help="Fine-tune FinBERT on Financial PhraseBank"
+    )
+    p_train_sentiment.set_defaults(func=cmd_train_sentiment)
+
+    p_sentiment = subparsers.add_parser(
+        "sentiment", help="Score unscored news headlines and recompute daily sentiment"
+    )
+    p_sentiment.set_defaults(func=cmd_sentiment)
+
+    p_evaluate_sentiment = subparsers.add_parser(
+        "evaluate-sentiment", help="Compare VADER/off-the-shelf/fine-tuned FinBERT on the held-out test split"
+    )
+    p_evaluate_sentiment.set_defaults(func=cmd_evaluate_sentiment)
 
     return parser
 

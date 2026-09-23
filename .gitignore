@@ -1,6 +1,7 @@
 venv/
 .env
 data/market_pred.db
+models/
 __pycache__/
 *.pyc
 .pytest_cache/

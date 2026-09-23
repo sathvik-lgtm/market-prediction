@@ -34,3 +34,23 @@ news_ingestion:
     - ndtvprofit.com
     - financialexpress.com
     - cnbctv18.com
+
+sentiment:
+  # Base checkpoint we fine-tune ourselves: BERT further pretrained on a large
+  # financial corpus (10-K/8-K filings, earnings calls) but with no classification
+  # head yet -- unlike ProsusAI/finbert, which is already fine-tuned on this same
+  # dataset, so fine-tuning it again would be redundant.
+  finbert_base_model: "yiyanghkust/finbert-pretrain"
+  # Off-the-shelf, already-fine-tuned FinBERT, used only as an evaluation comparison
+  # point (baseline vs off-the-shelf vs our fine-tuned model).
+  finbert_pretrained_model: "ProsusAI/finbert"
+  model_dir: "models/finbert_finetuned"
+  phrasebank_repo: "gtfintechlab/financial_phrasebank_sentences_allagree"
+  phrasebank_config: "5768"
+  val_fraction: 0.1
+  max_seq_length: 64
+  train_batch_size: 8
+  eval_batch_size: 16
+  num_epochs: 4
+  learning_rate: 0.00002
+  seed: 42
