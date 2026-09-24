@@ -1,4 +1,5 @@
 import json
+from datetime import date
 
 import joblib
 import numpy as np
@@ -12,7 +13,9 @@ from market_pred.modeling.predict import (
     ModelNotFoundError,
     get_latest_features,
     load_final_model,
+    load_report_generated_at,
     load_report_summary,
+    next_trading_session,
     predict_direction,
 )
 from tests.conftest import make_settings
@@ -128,3 +131,35 @@ def test_load_report_summary_reads_xgboost_summary(tmp_path):
     settings = make_settings(tmp_path / "test.db", modeling_model_dir=model_dir)
 
     assert load_report_summary(settings) == {"accuracy": 0.512}
+
+
+# --- load_report_generated_at ---
+
+def test_load_report_generated_at_none_when_missing(tmp_path):
+    settings = make_settings(tmp_path / "test.db", modeling_model_dir=tmp_path / "nope")
+    assert load_report_generated_at(settings) is None
+
+
+def test_load_report_generated_at_reads_timestamp(tmp_path):
+    model_dir = tmp_path / "models"
+    model_dir.mkdir()
+    report = {"generated_at": "2026-09-25T12:00:00Z"}
+    (model_dir / "report.json").write_text(json.dumps(report))
+    settings = make_settings(tmp_path / "test.db", modeling_model_dir=model_dir)
+
+    assert load_report_generated_at(settings) == "2026-09-25T12:00:00Z"
+
+
+# --- next_trading_session ---
+
+def test_next_trading_session_skips_weekend():
+    # Friday 2026-09-25 -> next session is Monday 2026-09-28, not Saturday.
+    assert next_trading_session(date(2026, 9, 25)) == date(2026, 9, 28)
+
+
+def test_next_trading_session_skips_nse_holiday():
+    # 2026-10-20 is Diwali Laxmi Puja, an NSE trading holiday (confirmed via
+    # the exchange's own published calendar) -- the point of this whole
+    # feature is that this is NOT just weekend-skipping, so a naive
+    # "add 1 business day" implementation would wrongly land here.
+    assert next_trading_session(date(2026, 10, 19)) != date(2026, 10, 20)

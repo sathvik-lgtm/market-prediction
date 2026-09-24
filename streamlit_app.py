@@ -2,13 +2,17 @@
 
     streamlit run streamlit_app.py
 
-Read-only against whatever's currently in data/market_pred.db and models/ --
-does not trigger ingestion, sentiment scoring, or training itself. Those stay
-CLI-only (python -m market_pred.pipeline refresh / train-sentiment / sentiment
-/ train-model), run externally; use the "Clear cache" button afterward so the
-dashboard picks up the change without restarting the process.
+Read-only against data/market_pred.db and models/ by default -- prices,
+sentiment, and predictions reflect whatever was last ingested/trained via
+python -m market_pred.pipeline (refresh / train-sentiment / sentiment /
+train-model), run externally. The sidebar's "Refresh data & retrain" button
+is the one exception: it runs that same pipeline in-process on click, which
+is why it can take up to a minute and needs NEWSAPI_KEY/a fine-tuned
+sentiment model/torch to fully succeed -- just viewing the dashboard doesn't.
 """
 from __future__ import annotations
+
+from datetime import date, datetime
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -28,7 +32,9 @@ from market_pred.modeling.predict import (
     ModelNotFoundError,
     get_latest_features,
     load_final_model,
+    load_report_generated_at,
     load_report_summary,
+    next_trading_session,
     predict_direction,
 )
 
@@ -94,6 +100,17 @@ def _load_daily_changes() -> pd.DataFrame:
     settings = get_settings()
     with get_connection(settings.db_path) as conn:
         return get_latest_daily_changes(conn)
+
+
+@st.cache_data
+def _load_next_session(after_date: str) -> str | None:
+    session = next_trading_session(date.fromisoformat(after_date))
+    return session.isoformat() if session else None
+
+
+@st.cache_data
+def _load_last_refresh() -> str | None:
+    return load_report_generated_at(get_settings())
 
 
 def render_top_movers(settings: Settings) -> None:
@@ -223,13 +240,16 @@ def render_prediction_panel(ticker: str, settings) -> None:
     label, confidence = predict_direction(model, features_row)
     arrow = "▲" if label == "Up" else "▼"
     swatch = "green" if label == "Up" else "red"
+    next_session = _load_next_session(features_row["date"])
+    session_phrase = f"the {next_session} session" if next_session else "the next trading session"
 
     with st.container(border=True):
         st.markdown(f"### :{swatch}[{arrow} {label}] — {confidence:.0%} confidence")
         st.caption(
             f"Based on data through {features_row['date']} "
-            f"(last close ₹{features_row['close']:.2f}) — predicts the next trading "
-            "session's direction. Price-only model, not sentiment-fused (see README's "
+            f"(last close ₹{features_row['close']:.2f}) — predicts direction for "
+            f"{session_phrase} (NSE trading-day calendar, so holidays are excluded, "
+            "not just weekends). Price-only model, not sentiment-fused (see README's "
             "sentiment ablation results for why)."
         )
 
@@ -273,7 +293,26 @@ def main() -> None:
         last_price_date, last_news_date = _load_freshness(st.session_state["ticker_symbol"])
         st.caption(f"Prices through {last_price_date or '—'} · News through {last_news_date or '—'}")
 
-        if st.button("🔄 Clear cache"):
+        last_refresh = _load_last_refresh()
+        if last_refresh:
+            refreshed_dt = datetime.strptime(last_refresh, "%Y-%m-%dT%H:%M:%SZ")
+            st.caption(f"Model last trained: {refreshed_dt:%Y-%m-%d %H:%M} UTC")
+        else:
+            st.caption("Model last trained: unknown (report.json predates this field)")
+
+        if st.button("🔄 Refresh data & retrain", width="stretch"):
+            with st.spinner("Pulling new prices/news, rescoring sentiment, and retraining -- this can take a minute..."):
+                try:
+                    from market_pred.pipeline import refresh_and_retrain
+                    refresh_and_retrain()
+                except Exception as e:
+                    st.error(f"Refresh failed: {e}")
+                else:
+                    st.cache_data.clear()
+                    st.cache_resource.clear()
+                    st.rerun()
+
+        if st.button("Clear cache"):
             st.cache_data.clear()
             st.cache_resource.clear()
             st.rerun()

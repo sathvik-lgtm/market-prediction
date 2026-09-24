@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import date, timedelta
+from functools import lru_cache
 
 import joblib
 import numpy as np
 import pandas as pd
+import pandas_market_calendars as mcal
 from xgboost import XGBClassifier
 
 from market_pred.config import Settings
@@ -71,6 +74,25 @@ def predict_direction(model: XGBClassifier, features_row: pd.Series) -> tuple[st
     return label, float(proba[idx])
 
 
+@lru_cache(maxsize=1)
+def _nse_calendar():
+    return mcal.get_calendar("NSE")
+
+
+def next_trading_session(after: date) -> date | None:
+    """The next actual NSE trading day strictly after `after`, via NSE's real
+    holiday calendar -- not weekend-only inference, so a holiday like Diwali
+    or Republic Day isn't mistaken for the next open session. Display-only:
+    feature engineering (`assign_effective_trading_day`) and walk-forward
+    fold boundaries never call this -- they already derive trading days from
+    the actual dates present in price history, not a calendar guess. None in
+    the practically-impossible case the calendar has no sessions in the next
+    two weeks.
+    """
+    schedule = _nse_calendar().valid_days(start_date=after + timedelta(days=1), end_date=after + timedelta(days=14))
+    return schedule[0].date() if len(schedule) else None
+
+
 def load_report_summary(settings: Settings) -> dict | None:
     """The xgboost walk-forward summary (accuracy, naive_always_up_accuracy,
     etc.) from the persisted training report, for a caption next to a live
@@ -82,3 +104,14 @@ def load_report_summary(settings: Settings) -> dict | None:
         return None
     report = json.loads(path.read_text())
     return report.get("price_only_walk_forward", {}).get("xgboost", {}).get("summary")
+
+
+def load_report_generated_at(settings: Settings) -> str | None:
+    """UTC timestamp (ISO 8601) of the last successful `train-model` run, for
+    a "Last updated" indicator so a viewer can tell fresh data from stale.
+    None if report.json doesn't exist yet, or predates this field.
+    """
+    path = settings.modeling_model_dir / "report.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text()).get("generated_at")

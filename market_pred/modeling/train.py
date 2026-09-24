@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 
 import joblib
 import pandas as pd
@@ -163,7 +164,11 @@ def run() -> None:
     settings.modeling_model_dir.mkdir(parents=True, exist_ok=True)
     joblib.dump(final_model, settings.modeling_model_dir / MODEL_FILENAME)
 
-    report = {"price_only_walk_forward": price_only_results, "sentiment_ablation": ablation_results}
+    report = {
+        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "price_only_walk_forward": price_only_results,
+        "sentiment_ablation": ablation_results,
+    }
     report_path = settings.modeling_model_dir / "report.json"
     report_path.write_text(json.dumps(report, indent=2, default=float))
     logger.info("Saved final model and wrote report to %s", settings.modeling_model_dir)

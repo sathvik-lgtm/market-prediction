@@ -18,6 +18,8 @@ direction classifiers, and a read-only Streamlit dashboard are all implemented. 
 - [Financial PhraseBank](https://huggingface.co/datasets/gtfintechlab/financial_phrasebank_sentences_allagree) — labeled dataset used to fine-tune FinBERT
 - `scikit-learn` (logistic regression, metrics) / `xgboost` — direction classifiers
 - `streamlit` / `plotly` — the dashboard
+- [`pandas_market_calendars`](https://github.com/rsheftel/pandas_market_calendars) — NSE's actual
+  trading-day calendar, so the dashboard's "next session" date correctly skips holidays, not just weekends
 
 ## Setup
 
@@ -286,11 +288,18 @@ as `refresh` keeps running past NewsAPI's lookback window.
 
 ## Dashboard
 
-A Streamlit app (`streamlit_app.py`, repo root) that's **read-only** against whatever's
-currently in `data/market_pred.db` and `models/` — it does not trigger ingestion,
-sentiment scoring, or training itself. Those stay CLI-only; use the sidebar's "Clear
-cache" button after re-running one of them so the dashboard picks up the change without
-restarting the process.
+A Streamlit app (`streamlit_app.py`, repo root) that's **read-only by default** against
+whatever's currently in `data/market_pred.db` and `models/`. The sidebar's **"Refresh
+data & retrain"** button is the one exception: it runs the same ingestion + sentiment
+scoring + `train-model` pipeline in-process, clears the dashboard's caches, and reruns
+the page when it finishes — no separate terminal needed. It needs `NEWSAPI_KEY` and (if
+a fine-tuned sentiment model exists) `torch`/`transformers` to fully succeed, can take up
+to a minute, and is subject to the same NewsAPI rate limits as the CLI (a 429 mid-run is
+logged and skipped per ticker, not fatal — see "Known limitations"). The sidebar also
+shows "Model last trained" so it's always clear how fresh the current prediction is. The
+CLI commands below still work exactly as before, for a scripted/scheduled refresh instead
+of a manual button click — either way, a plain "Clear cache" button remains for picking up
+a CLI-driven change without restarting the process.
 
 **Running it:**
 
@@ -324,10 +333,12 @@ dropdown — both stay in sync via `st.session_state`.
 - **News sentiment trend** — `daily_sentiment`'s calendar-day aggregate (naturally
   covers only the last ~29 days per NewsAPI's free tier, as above) plus a recent-headlines
   table with each one's FinBERT label.
-- **Model prediction** — the persisted price-only XGBoost model's next-session call and
-  confidence, with an expander showing its own walk-forward accuracy (~50.5% vs. ~50.9%
-  naive) so a single prediction isn't over-trusted. Deliberately **not** sentiment-fused,
-  matching the sentiment ablation finding above — only the price-only model was persisted.
+- **Model prediction** — the persisted price-only XGBoost model's call and confidence for
+  the next actual NSE trading session (named by date, via `pandas_market_calendars`'s NSE
+  calendar — holidays like Diwali/Republic Day are excluded, not just weekends), with an
+  expander showing its own walk-forward accuracy (~50.5% vs. ~50.9% naive) so a single
+  prediction isn't over-trusted. Deliberately **not** sentiment-fused, matching the
+  sentiment ablation finding above — only the price-only model was persisted.
 
 ## Known limitations
 
@@ -359,11 +370,16 @@ dropdown — both stay in sync via `st.session_state`.
   "strategy return" is a simple long/flat simulation with no transaction costs,
   slippage, or position sizing — useful for comparing models against buy-and-hold on
   equal footing, not a claim about real-world profitability.
-- The dashboard is read-only and shows a point-in-time snapshot — it will not reflect
-  newer data or a freshly retrained model until the relevant CLI command is re-run and
-  the sidebar's cache is cleared.
-- The prediction panel can't name an exact "next trading day" — this codebase has no
-  market holiday calendar, only weekends implied by gaps in price history.
+- The dashboard's "Refresh data & retrain" button runs the pipeline synchronously
+  in-process (a spinner covers the wait) — there's no background job queue, so the
+  browser tab needs to stay open until it finishes, and only one refresh can run at a
+  time. Fine at this project's single-user scale; would need a real task queue to serve
+  multiple concurrent users.
+- Feature engineering (`assign_effective_trading_day`) and walk-forward fold boundaries
+  were never affected by the old weekend-only gap inference — both already derive
+  trading days from the actual dates present in price history, not a calendar guess.
+  The NSE calendar (`pandas_market_calendars`) is used only for the dashboard's
+  human-readable "next session" date, a display concern, not a modeling one.
 - A ticker with too little trailing price history (fewer than ~20 trading days) can't
   produce a prediction; the dashboard shows a clean message rather than crashing. Not
   expected for the 5 configured tickers (8 years of history each), but would apply to

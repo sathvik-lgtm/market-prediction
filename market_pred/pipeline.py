@@ -69,6 +69,23 @@ def cmd_refresh(args: argparse.Namespace) -> None:
         )
 
 
+def refresh_and_retrain(tickers: list[str] | None = None) -> None:
+    """Programmatic equivalent of `refresh` + `train-model`, for callers that
+    aren't going through the CLI (the dashboard's "Refresh data & retrain"
+    button). Unlike the CLI commands, this doesn't catch/log-and-continue --
+    it lets exceptions propagate so the caller (e.g. Streamlit) can decide how
+    to surface a failure to whoever's looking at the page.
+    """
+    prices_ingest.run(tickers=tickers)
+    news_ingest.run(tickers=tickers)
+    settings = get_settings()
+    if (settings.sentiment_model_dir / "final").exists():
+        sentiment_run.run()
+    else:
+        logger.info("No fine-tuned sentiment model yet -- skipping sentiment scoring")
+    model_train.run()
+
+
 def cmd_train_sentiment(_args: argparse.Namespace) -> None:
     sentiment_train.run()
 
