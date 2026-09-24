@@ -3,11 +3,11 @@
 Predicts short-term price direction (up/down) for NSE-listed Indian stocks by combining
 financial news sentiment with historical price/technical data.
 
-**Status: Phase 2 of 5 (Sentiment Modeling).** Data acquisition (price/news ingestion)
-and sentiment scoring (a self-fine-tuned FinBERT) are implemented. Predictive modeling
-and the Streamlit dashboard are later phases and are not implemented yet.
+**Status: Phase 3 of 5 (Predictive Modeling).** Data acquisition, sentiment scoring, and
+walk-forward-validated direction classifiers are implemented. The Streamlit dashboard is
+the last remaining phase.
 
-## Tech stack (Phases 1-2)
+## Tech stack (Phases 1-3)
 
 - Python
 - [`yfinance`](https://pypi.org/project/yfinance/) — historical daily OHLCV price data
@@ -16,6 +16,7 @@ and the Streamlit dashboard are later phases and are not implemented yet.
 - [VADER](https://github.com/cjhutto/vaderSentiment) — rule-based sentiment baseline
 - [`transformers`](https://huggingface.co/docs/transformers)/`torch` — FinBERT fine-tuning and inference
 - [Financial PhraseBank](https://huggingface.co/datasets/gtfintechlab/financial_phrasebank_sentences_allagree) — labeled dataset used to fine-tune FinBERT
+- `scikit-learn` (logistic regression, metrics) / `xgboost` — direction classifiers
 
 ## Setup
 
@@ -87,6 +88,7 @@ python -m market_pred.pipeline refresh                               # prices + 
 python -m market_pred.pipeline train-sentiment                      # fine-tune FinBERT (one-time, ~20 min on CPU)
 python -m market_pred.pipeline sentiment                            # score unscored headlines + recompute aggregates
 python -m market_pred.pipeline evaluate-sentiment                   # VADER vs off-the-shelf vs fine-tuned comparison
+python -m market_pred.pipeline train-model                          # walk-forward train/evaluate direction models
 ```
 
 All commands are safe to re-run: price upserts are idempotent (keyed on `ticker, date`),
@@ -177,6 +179,51 @@ negative / 417 neutral / 170 positive), and both dramatically outperform the rul
 baseline — validating that the fine-tuning pipeline itself is sound, not just that
 "FinBERT is good."
 
+## Predictive modeling
+
+**Target**: next-day direction — `close[t+1] > close[t]`, binary. **Features**
+(`market_pred/modeling/features.py`): lagged returns (1/5/10/20-day), price relative to
+5/10/20-day moving averages, 20-day volume ratio, 10/20-day return volatility — all
+computed with only backward-looking rolling windows, so no lookahead risk by
+construction. **Models**: logistic regression and XGBoost (per the plan; LSTM is an
+explicit stretch goal, not attempted yet — the baselines' results below don't currently
+justify the added complexity). **Validation**: walk-forward only, never a random split —
+an expanding window seeded with 2 years of history, one fold per subsequent calendar
+year, split by date across all 5 pooled tickers at once so no fold's boundary can leak
+one ticker's future into another's past.
+
+**The sentiment lookahead-bias rule, finally implemented** (flagged back in Phase 1's
+schema notes and deferred until this exact point): `assign_effective_trading_day()`
+attributes each headline to the earliest trading day whose 15:30 IST close is at or
+after its publish time. A headline published during session D counts toward predicting
+D+1; one published after D's close — including across a weekend/holiday — rolls forward
+to whatever the next actual trading day is. This is a *different, lookahead-safe*
+aggregation from the `daily_sentiment` table (which groups by raw calendar day for
+display purposes only, as documented above) — modeling recomputes its own sentiment
+features from scored headlines directly rather than reusing that table.
+
+**Results** (`python -m market_pred.pipeline train-model`), 7 walk-forward folds
+(2020–2026) over 10,695 pooled rows, averaged:
+
+| Model | Accuracy | Naive ("always up") | Strategy mean return | Buy-and-hold mean return |
+|---|---|---|---|---|
+| Logistic regression | 49.4% | 50.5% | 0.00013 | 0.00037 |
+| XGBoost | 51.2% | 50.5% | 0.00043 | 0.00037 |
+
+XGBoost edges out the naive baseline and buy-and-hold on average, but only marginally —
+consistent with next-day direction from technical indicators alone being a genuinely
+hard, close-to-efficient-market problem, not a sign of a bug. Logistic regression
+doesn't beat naive at all. Neither result accounts for transaction costs or slippage,
+so read the strategy-return edge as illustrative, not a claim that this is tradeable.
+
+**Sentiment ablation** (same price-only vs. price+sentiment features, evaluated on the
+identical small overlap window — 38 train / 14 test rows, 20 unique dates — since
+that's all that currently exists): price-only scored 71.4% accuracy vs. 64.3% with
+sentiment added. Sentiment did not help here, and this specific comparison is not
+strong evidence that it can't — 14 test rows means a single flipped prediction moves
+accuracy by ~7 points. A meaningful answer needs more overlapping history, which only
+accumulates as `refresh` keeps running past NewsAPI's lookback window.
+
 ## Known limitations
 
 - **NewsAPI free tier**: the "Developer" plan only returns articles from roughly the last
@@ -193,17 +240,20 @@ baseline — validating that the fine-tuning pipeline itself is sound, not just 
 - A second news source could be added later without a rewrite: `ingest/news.py`'s
   `fetch_news_for_ticker` always returns a list of source-agnostic `NormalizedArticle`
   objects, so storage, dedup, and the CLI wouldn't need to change.
-- **Sentiment coverage is sparse relative to price history.** Price history spans
-  2018-present (~2,159 trading days/ticker); news — and therefore `daily_sentiment` —
-  only covers the last ~29 days per NewsAPI's free-tier lookback, growing forward from
-  whenever `refresh` starts running regularly. A later phase's feature engineering will
-  need a strategy for the vast majority of price history having no sentiment signal
-  (e.g. training/evaluating only on the overlapping window, or treating missing days as
-  neutral) — not solved here, just flagged so it isn't a surprise.
+- **Sentiment coverage is sparse relative to price history**, resolved in Phase 3 by
+  running two separate evaluations rather than forcing one dataset to serve both: a
+  full-history (2018+) price-only model for statistically meaningful walk-forward
+  results, plus a small-sample ablation on just the overlapping recent window to check
+  whether sentiment helps when it's actually available. See "Predictive modeling" above
+  — this will keep improving as `refresh` accumulates more overlapping history over time.
 - The Financial PhraseBank test-set evaluation measures sentiment classification
   quality on analyst-style sentences, not on our actual NSE headlines (which have no
   ground-truth sentiment labels to evaluate against) — a proxy, not a direct measure of
   how well it scores our specific data.
+- **The price-direction models are unvalidated as a trading strategy**: the reported
+  "strategy return" is a simple long/flat simulation with no transaction costs,
+  slippage, or position sizing — useful for comparing models against buy-and-hold on
+  equal footing, not a claim about real-world profitability.
 
 ## Running tests
 

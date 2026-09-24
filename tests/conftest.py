@@ -44,6 +44,10 @@ def make_settings(db_path: Path, **overrides) -> Settings:
         sentiment_num_epochs=4,
         sentiment_learning_rate=2e-5,
         sentiment_seed=42,
+        modeling_model_dir=db_path.parent / "models" / "direction_model",
+        modeling_min_train_years=2,
+        modeling_sentiment_test_fraction=0.3,
+        modeling_seed=42,
     )
     defaults.update(overrides)
     return Settings(**defaults)

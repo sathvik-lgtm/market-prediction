@@ -184,6 +184,20 @@ def recompute_daily_sentiment(conn: sqlite3.Connection) -> int:
     return upsert_daily_sentiment(conn, df)
 
 
+def get_scored_news_for_ticker(conn: sqlite3.Connection, ticker: str) -> pd.DataFrame:
+    """Raw per-headline sentiment scores for one ticker (only scored rows).
+
+    Unlike `daily_sentiment` (grouped by calendar day, for display/EDA), this
+    returns individual timestamped rows so a caller can apply a lookahead-bias-safe
+    trading-day assignment before aggregating for modeling.
+    """
+    query = (
+        "SELECT published_at_utc, finbert_score, vader_score FROM news "
+        "WHERE ticker = ? AND sentiment_scored_at IS NOT NULL ORDER BY published_at_utc"
+    )
+    return pd.read_sql_query(query, conn, params=[ticker])
+
+
 def get_daily_sentiment(
     conn: sqlite3.Connection,
     ticker: str,

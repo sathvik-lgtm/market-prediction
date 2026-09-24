@@ -54,3 +54,13 @@ sentiment:
   num_epochs: 4
   learning_rate: 0.00002
   seed: 42
+
+modeling:
+  model_dir: "models/direction_model"
+  # Seed years of price history before the first walk-forward test fold, so
+  # the earliest fold still trains on a reasonable amount of history.
+  min_train_years: 2
+  # Fraction held out as the test set for the small-sample sentiment ablation
+  # (single chronological split, not multi-fold -- see README).
+  sentiment_test_fraction: 0.3
+  seed: 42

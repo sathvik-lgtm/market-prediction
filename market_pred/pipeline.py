@@ -7,6 +7,7 @@
     python -m market_pred.pipeline train-sentiment
     python -m market_pred.pipeline sentiment
     python -m market_pred.pipeline evaluate-sentiment
+    python -m market_pred.pipeline train-model
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ from market_pred.db.connection import get_connection
 from market_pred.db.schema import init_db
 from market_pred.ingest import news as news_ingest
 from market_pred.ingest import prices as prices_ingest
+from market_pred.modeling import train as model_train
 from market_pred.sentiment import evaluate as sentiment_evaluate
 from market_pred.sentiment import run as sentiment_run
 from market_pred.sentiment import train as sentiment_train
@@ -65,6 +67,10 @@ def cmd_evaluate_sentiment(_args: argparse.Namespace) -> None:
     sentiment_evaluate.run()
 
 
+def cmd_train_model(_args: argparse.Namespace) -> None:
+    model_train.run()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="market_pred.pipeline")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -99,6 +105,11 @@ def build_parser() -> argparse.ArgumentParser:
         "evaluate-sentiment", help="Compare VADER/off-the-shelf/fine-tuned FinBERT on the held-out test split"
     )
     p_evaluate_sentiment.set_defaults(func=cmd_evaluate_sentiment)
+
+    p_train_model = subparsers.add_parser(
+        "train-model", help="Walk-forward train/evaluate direction classifiers + sentiment ablation"
+    )
+    p_train_model.set_defaults(func=cmd_train_model)
 
     return parser
 

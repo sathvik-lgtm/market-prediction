@@ -42,6 +42,10 @@ class Settings:
     sentiment_num_epochs: int
     sentiment_learning_rate: float
     sentiment_seed: int
+    modeling_model_dir: Path
+    modeling_min_train_years: int
+    modeling_sentiment_test_fraction: float
+    modeling_seed: int
 
     def get_newsapi_key(self) -> str:
         key = os.environ.get("NEWSAPI_KEY")
@@ -66,6 +70,7 @@ def get_settings(config_path: str | Path = REPO_ROOT / "config.yaml") -> Setting
     price_cfg = raw["price_ingestion"]
     news_cfg = raw["news_ingestion"]
     sentiment_cfg = raw["sentiment"]
+    modeling_cfg = raw["modeling"]
 
     return Settings(
         tickers=tickers,
@@ -89,4 +94,8 @@ def get_settings(config_path: str | Path = REPO_ROOT / "config.yaml") -> Setting
         sentiment_num_epochs=int(sentiment_cfg["num_epochs"]),
         sentiment_learning_rate=float(sentiment_cfg["learning_rate"]),
         sentiment_seed=int(sentiment_cfg["seed"]),
+        modeling_model_dir=REPO_ROOT / modeling_cfg["model_dir"],
+        modeling_min_train_years=int(modeling_cfg["min_train_years"]),
+        modeling_sentiment_test_fraction=float(modeling_cfg["sentiment_test_fraction"]),
+        modeling_seed=int(modeling_cfg["seed"]),
     )
