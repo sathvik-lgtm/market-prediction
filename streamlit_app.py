@@ -33,11 +33,13 @@ from market_pred.modeling.predict import (
 
 st.set_page_config(page_title="NSE Market Sentiment + Direction Predictor", page_icon="📈", layout="wide")
 
+# Status colors (mode-invariant by design in the dataviz palette -- same hex
+# in light and dark). The sentiment chart's two lines deliberately do NOT get
+# hardcoded colors here -- they're left unset so Plotly assigns them from the
+# theme's chartCategoricalColors (.streamlit/config.toml), which gives correct
+# per-mode colors (light vs dark step) for free.
 GOOD_COLOR = "#0ca30c"
 CRITICAL_COLOR = "#d03b3b"
-NEUTRAL_COLOR = "#6b7280"
-FINBERT_COLOR = "#2a78d6"
-VADER_COLOR = "#eb6834"
 LABEL_EMOJI = {"positive": "🟢", "negative": "🔴", "neutral": "⚪"}
 
 
@@ -87,7 +89,7 @@ def _load_freshness(ticker: str) -> tuple[str | None, str | None]:
 
 
 def render_price_panel(ticker: str) -> None:
-    st.header("Price")
+    st.header("💰 Price")
     prices = _load_price_history(ticker)
     if prices.empty:
         st.info("No price history for this ticker yet.")
@@ -99,6 +101,7 @@ def render_price_panel(ticker: str) -> None:
         increasing_line_color=GOOD_COLOR, increasing_fillcolor=GOOD_COLOR,
         decreasing_line_color=CRITICAL_COLOR, decreasing_fillcolor=CRITICAL_COLOR,
         name=ticker,
+        showlegend=False,
     )])
     max_date = prices["date"].max()
     cutoff = (pd.to_datetime(max_date) - pd.Timedelta(days=180)).strftime("%Y-%m-%d")
@@ -116,7 +119,7 @@ def render_price_panel(ticker: str) -> None:
 
 
 def render_sentiment_panel(ticker: str) -> None:
-    st.header("News Sentiment Trend")
+    st.header("📰 News Sentiment Trend")
     sentiment = _load_daily_sentiment(ticker)
     if sentiment.empty:
         st.info(
@@ -125,26 +128,33 @@ def render_sentiment_panel(ticker: str) -> None:
         )
     else:
         fig = go.Figure()
-        fig.add_hline(y=0, line_color=NEUTRAL_COLOR, line_width=1)
         fig.add_trace(go.Scatter(
             x=sentiment["date"], y=sentiment["mean_finbert_score"],
             mode="lines+markers", name="FinBERT (fine-tuned)",
-            line=dict(color=FINBERT_COLOR),
             customdata=sentiment["article_count"],
-            hovertemplate="%{x}<br>FinBERT: %{y:.3f}<br>Articles: %{customdata}<extra></extra>",
+            hovertemplate="FinBERT: %{y:.3f}<br>Articles: %{customdata}<extra></extra>",
         ))
         fig.add_trace(go.Scatter(
             x=sentiment["date"], y=sentiment["mean_vader_score"],
-            mode="lines+markers", name="VADER (baseline)",
-            line=dict(color=VADER_COLOR), opacity=0.6,
+            mode="lines+markers", name="VADER (baseline)", opacity=0.6,
+            hovertemplate="VADER: %{y:.3f}<extra></extra>",
         ))
-        fig.update_layout(height=350, margin=dict(t=20, b=20), yaxis_title="Mean sentiment score")
+        fig.update_yaxes(zeroline=True, zerolinewidth=1)
+        fig.update_layout(
+            height=350,
+            margin=dict(t=20, b=20),
+            yaxis_title="Mean sentiment score",
+            hovermode="x unified",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        )
         st.plotly_chart(fig)
         st.caption(
             "Grouped by naive calendar day, for display only -- not the lookahead-safe "
             "aggregation the prediction model uses. Typically covers the last ~29 days "
             "(NewsAPI free-tier lookback)."
         )
+        with st.expander("Raw sentiment data"):
+            st.dataframe(sentiment, hide_index=True)
 
     st.subheader("Recent headlines")
     news = _load_recent_news(ticker)
@@ -162,7 +172,7 @@ def render_sentiment_panel(ticker: str) -> None:
 
 
 def render_prediction_panel(ticker: str, settings) -> None:
-    st.header("Model Prediction")
+    st.header("🎯 Model Prediction")
     try:
         model = _load_model()
     except ModelNotFoundError as e:
@@ -187,15 +197,14 @@ def render_prediction_panel(ticker: str, settings) -> None:
             "sentiment ablation results for why)."
         )
 
-    summary = load_report_summary(settings)
-    if summary:
-        with st.expander("Model accuracy (walk-forward validated)"):
-            st.write(
-                f"XGBoost walk-forward accuracy: **{summary['accuracy']:.1%}** vs. "
-                f"naive \"always predict up\" baseline: **{summary['naive_always_up_accuracy']:.1%}** "
-                "(7 expanding-window folds, 2020-2026, pooled across all 5 tickers). "
-                "A small, honest edge -- not a reliable trading signal. \"Down\" includes "
-                "flat/zero-return days."
+        summary = load_report_summary(settings)
+        if summary:
+            col1, col2 = st.columns(2)
+            col1.metric("XGBoost accuracy (walk-forward)", f"{summary['accuracy']:.1%}")
+            col2.metric("Naive \"always up\" baseline", f"{summary['naive_always_up_accuracy']:.1%}")
+            st.caption(
+                "7 expanding-window folds, 2020-2026, pooled across all 5 tickers. A small, "
+                "honest edge -- not a reliable trading signal. \"Down\" includes flat/zero-return days."
             )
 
 
@@ -228,7 +237,9 @@ def main() -> None:
             st.rerun()
 
     render_price_panel(ticker)
+    st.divider()
     render_sentiment_panel(ticker)
+    st.divider()
     render_prediction_panel(ticker, settings)
 
 
