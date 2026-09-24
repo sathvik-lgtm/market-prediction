@@ -387,42 +387,24 @@ dropdown — both stay in sync via `st.session_state`.
 
 ## What I learned
 
-A few things from this project stuck with me more than the rest:
-
-- Lookahead bias sounds obvious in theory but is easy to mess up in practice. I assumed
-  joining news to prices by calendar day would be fine — it isn't, since a headline
-  published at 4pm didn't exist yet when the market closed. Writing
-  `assign_effective_trading_day()` (roll a headline forward to the next trading day if it
-  landed after that day's 15:30 IST close) ended up taking longer than the actual model
-  code, which in hindsight is probably the right amount of effort to spend on it.
-- Testing on one example isn't really testing. I "fixed" a news-search bug for
-  RELIANCE.NS, skimmed a few headlines, and called it done. It wasn't — the same bug
-  (matching bare tickers against unrelated articles) was quietly polluting every other
-  ticker too, just less obviously. I only caught the real scope of it after going back
-  and reading headlines for every ticker, not just the one that got flagged.
-- Landing around 50% accuracy isn't the model failing — for next-day direction from
-  technical indicators alone, that's honestly the believable outcome. If it had come back
-  much higher I'd have trusted it a lot less. Resisting the urge to tune toward a
-  better-looking number was part of the point.
-- Small sample sizes can flip your conclusions completely. The sentiment-vs-no-sentiment
-  comparison actually reversed between the 5-ticker version (52 rows) and the 51-ticker
-  version (239 rows) — same method, opposite-looking result. Now I don't trust any single
-  number in this project without checking how much data it's sitting on.
-- I'm apparently not great at predicting where the next bug will come from. Before
-  expanding to 51 tickers I figured recently-renamed companies like ETERNAL.NS or
-  TRENT.NS would cause news-matching problems. They were fine. The real offenders —
-  BSE.NS and ITC.NS — weren't even on my radar, because "BSE" is just how people refer to
-  the exchange itself and "ITC" gets used for Input Tax Credit constantly. Only found
-  this by actually reading the headlines, not by guessing in advance.
-- Free API tiers aren't something you patch around after the fact, they shape the whole
-  design from day one. NewsAPI's 100 requests/day and ~29-day lookback meant the
-  ingestion pipeline had to be incremental and quota-aware from the start, not something
-  bolted on after it broke once.
-- Libraries fail in ways their docs don't always warn you about. XGBoost's sklearn
-  wrapper checks that your DataFrame's columns are in the exact order it was trained on
-  and just raises if not — it doesn't quietly realign by column name like I assumed it
-  would. Found that one by testing against the actual saved model, not by reading the API
-  reference, and it's now a permanent regression test so it can't sneak back in.
+- Lookahead bias is easy to miss even when you're looking for it. A headline published at
+  4pm didn't exist yet when the market closed — `assign_effective_trading_day()` rolls it
+  forward to the next trading day instead of naively joining by calendar date.
+- Testing on one example isn't testing. I "fixed" a news-search bug for RELIANCE.NS,
+  skimmed a few headlines, called it done — and missed that the same bug was polluting
+  every other ticker too, just less visibly.
+- ~50% accuracy isn't the model failing. For next-day direction from technical indicators
+  alone, that's the believable outcome — a much higher number would've worried me more.
+- Small samples can flip conclusions entirely. The sentiment-vs-no-sentiment result
+  reversed between 52 rows (5 tickers) and 239 rows (51 tickers), same method.
+- I'm bad at predicting where bugs will come from. I expected renamed tickers like
+  ETERNAL.NS to cause news-matching noise; they were fine. The real offenders — BSE.NS,
+  ITC.NS — weren't on my radar at all.
+- Free API tiers shape the design from day one, not after the fact. NewsAPI's 100
+  requests/day and ~29-day lookback meant the ingestion pipeline had to be incremental
+  and quota-aware from the start.
+- Libraries fail in ways docs don't warn you about. XGBoost's sklearn wrapper raises if a
+  DataFrame's columns aren't in the exact fitted order — it won't quietly realign by name.
 
 ## Running tests
 
