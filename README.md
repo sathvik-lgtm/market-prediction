@@ -3,11 +3,11 @@
 Predicts short-term price direction (up/down) for NSE-listed Indian stocks by combining
 financial news sentiment with historical price/technical data.
 
-**Status: Phase 3 of 5 (Predictive Modeling).** Data acquisition, sentiment scoring, and
-walk-forward-validated direction classifiers are implemented. The Streamlit dashboard is
-the last remaining phase.
+**Status: Phase 4 of 5 (Dashboard).** Data acquisition, sentiment scoring, walk-forward-validated
+direction classifiers, and a read-only Streamlit dashboard are all implemented. Only Phase 5
+(write-up) remains.
 
-## Tech stack (Phases 1-3)
+## Tech stack (Phases 1-4)
 
 - Python
 - [`yfinance`](https://pypi.org/project/yfinance/) — historical daily OHLCV price data
@@ -17,6 +17,7 @@ the last remaining phase.
 - [`transformers`](https://huggingface.co/docs/transformers)/`torch` — FinBERT fine-tuning and inference
 - [Financial PhraseBank](https://huggingface.co/datasets/gtfintechlab/financial_phrasebank_sentences_allagree) — labeled dataset used to fine-tune FinBERT
 - `scikit-learn` (logistic regression, metrics) / `xgboost` — direction classifiers
+- `streamlit` / `plotly` — the dashboard
 
 ## Setup
 
@@ -89,6 +90,7 @@ python -m market_pred.pipeline train-sentiment                      # fine-tune 
 python -m market_pred.pipeline sentiment                            # score unscored headlines + recompute aggregates
 python -m market_pred.pipeline evaluate-sentiment                   # VADER vs off-the-shelf vs fine-tuned comparison
 python -m market_pred.pipeline train-model                          # walk-forward train/evaluate direction models
+streamlit run streamlit_app.py                                      # launch the dashboard (separate from pipeline.py)
 ```
 
 All commands are safe to re-run: price upserts are idempotent (keyed on `ticker, date`),
@@ -224,6 +226,41 @@ strong evidence that it can't — 14 test rows means a single flipped prediction
 accuracy by ~7 points. A meaningful answer needs more overlapping history, which only
 accumulates as `refresh` keeps running past NewsAPI's lookback window.
 
+## Dashboard
+
+A Streamlit app (`streamlit_app.py`, repo root) that's **read-only** against whatever's
+currently in `data/market_pred.db` and `models/` — it does not trigger ingestion,
+sentiment scoring, or training itself. Those stay CLI-only; use the sidebar's "Clear
+cache" button after re-running one of them so the dashboard picks up the change without
+restarting the process.
+
+**Running it:**
+
+```powershell
+# Fast/offline path -- no NEWSAPI_KEY needed, seconds not minutes:
+python scripts/load_seed_data.py
+python -m market_pred.pipeline train-model
+streamlit run streamlit_app.py
+
+# Full/live path -- real current data:
+python -m market_pred.pipeline refresh
+python -m market_pred.pipeline train-sentiment   # one-time, ~20 min on CPU
+python -m market_pred.pipeline sentiment
+python -m market_pred.pipeline train-model
+streamlit run streamlit_app.py
+```
+
+**What each panel shows**, selecting a ticker from the sidebar:
+- **Price** — candlestick chart (split/dividend-adjusted close), defaulting to the last
+  ~6 months with the full history reachable via the range slider.
+- **News sentiment trend** — `daily_sentiment`'s calendar-day aggregate (naturally
+  covers only the last ~29 days per NewsAPI's free tier, as above) plus a recent-headlines
+  table with each one's FinBERT label.
+- **Model prediction** — the persisted price-only XGBoost model's next-session call and
+  confidence, with an expander showing its own walk-forward accuracy (~51.2% vs. ~50.5%
+  naive) so a single prediction isn't over-trusted. Deliberately **not** sentiment-fused,
+  matching the sentiment ablation finding above — only the price-only model was persisted.
+
 ## Known limitations
 
 - **NewsAPI free tier**: the "Developer" plan only returns articles from roughly the last
@@ -254,6 +291,15 @@ accumulates as `refresh` keeps running past NewsAPI's lookback window.
   "strategy return" is a simple long/flat simulation with no transaction costs,
   slippage, or position sizing — useful for comparing models against buy-and-hold on
   equal footing, not a claim about real-world profitability.
+- The dashboard is read-only and shows a point-in-time snapshot — it will not reflect
+  newer data or a freshly retrained model until the relevant CLI command is re-run and
+  the sidebar's cache is cleared.
+- The prediction panel can't name an exact "next trading day" — this codebase has no
+  market holiday calendar, only weekends implied by gaps in price history.
+- A ticker with too little trailing price history (fewer than ~20 trading days) can't
+  produce a prediction; the dashboard shows a clean message rather than crashing. Not
+  expected for the 5 configured tickers (8 years of history each), but would apply to
+  a newly added ticker.
 
 ## Running tests
 

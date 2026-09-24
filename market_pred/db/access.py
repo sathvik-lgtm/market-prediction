@@ -127,7 +127,8 @@ def get_news_for_ticker(
 ) -> pd.DataFrame:
     query = (
         "SELECT ticker, source_name, author, title, description, url, "
-        "published_at_utc, published_date_ist FROM news WHERE ticker = ?"
+        "published_at_utc, published_date_ist, vader_score, finbert_label, "
+        "finbert_score, finbert_confidence FROM news WHERE ticker = ?"
     )
     params: list = [ticker]
     if start is not None:

@@ -36,6 +36,7 @@ from market_pred.modeling.features import (
     build_price_only_dataset,
     build_price_sentiment_dataset,
 )
+from market_pred.modeling.predict import MODEL_FILENAME
 from market_pred.modeling.validation import simple_holdout_split, split_fold, yearly_expanding_folds
 
 logger = logging.getLogger(__name__)
@@ -160,7 +161,7 @@ def run() -> None:
         final_model = _fit_final_model(conn, settings)
 
     settings.modeling_model_dir.mkdir(parents=True, exist_ok=True)
-    joblib.dump(final_model, settings.modeling_model_dir / "final_xgboost.joblib")
+    joblib.dump(final_model, settings.modeling_model_dir / MODEL_FILENAME)
 
     report = {"price_only_walk_forward": price_only_results, "sentiment_ablation": ablation_results}
     report_path = settings.modeling_model_dir / "report.json"

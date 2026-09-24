@@ -94,6 +94,36 @@ def test_insert_news_articles_dedups_on_ticker_and_url(db_conn):
     assert len(rows) == 1
 
 
+def test_get_news_for_ticker_sentiment_columns_null_when_unscored(db_conn):
+    insert_news_articles(db_conn, [make_article()])
+
+    row = get_news_for_ticker(db_conn, "TEST.NS").iloc[0]
+
+    assert pd.isna(row["finbert_label"])
+    assert pd.isna(row["finbert_score"])
+    assert pd.isna(row["vader_score"])
+
+
+def test_get_news_for_ticker_includes_sentiment_columns_when_scored(db_conn):
+    insert_news_articles(db_conn, [make_article()])
+    unscored = get_unscored_news(db_conn)
+    update_news_sentiment(db_conn, [{
+        "id": int(unscored.iloc[0]["id"]),
+        "vader_score": 0.4,
+        "finbert_label": "positive",
+        "finbert_score": 0.6,
+        "finbert_confidence": 0.8,
+        "sentiment_scored_at": "2024-01-03T00:00:00Z",
+    }])
+
+    row = get_news_for_ticker(db_conn, "TEST.NS").iloc[0]
+
+    assert row["finbert_label"] == "positive"
+    assert row["finbert_score"] == pytest.approx(0.6)
+    assert row["vader_score"] == pytest.approx(0.4)
+    assert row["finbert_confidence"] == pytest.approx(0.8)
+
+
 def test_get_last_news_date(db_conn):
     assert get_last_news_date(db_conn, "TEST.NS") is None
 
