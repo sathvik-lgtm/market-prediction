@@ -45,9 +45,12 @@ python -m market_pred.pipeline refresh
 ```
 
 This creates `data/market_pred.db` if it doesn't exist, then fetches/upserts price
-history and news headlines for the 5 tickers configured in `config.yaml`. If a
-fine-tuned sentiment model already exists (see below), `refresh` also scores any new
-headlines automatically.
+history and news headlines for the 51 tickers configured in `config.yaml` (the Nifty 50
+plus BSE.NS — see "Ticker universe" below). If a fine-tuned sentiment model already
+exists (see below), `refresh` also scores any new headlines automatically.
+
+While developing, use `--tickers SYMBOL.NS ...` or `--limit N` (first N configured
+tickers) to work against a small subset instead of all 51 — see "Ticker universe."
 
 ### Try it without a NewsAPI key or training a model
 
@@ -83,6 +86,7 @@ python -m market_pred.pipeline sentiment
 python -m market_pred.pipeline init-db                              # create tables only
 python -m market_pred.pipeline prices                               # fetch/upsert prices, all tickers
 python -m market_pred.pipeline prices --tickers RELIANCE.NS TCS.NS  # subset of tickers
+python -m market_pred.pipeline prices --limit 5                     # first N configured tickers (dev testing)
 python -m market_pred.pipeline prices --full-refresh                # refetch full history
 python -m market_pred.pipeline news                                 # fetch/insert news, all tickers
 python -m market_pred.pipeline refresh                               # prices + news + sentiment (if trained)
@@ -102,6 +106,52 @@ To regenerate the committed demo snapshot from your local DB:
 ```powershell
 python scripts/export_seed_data.py
 ```
+
+## Ticker universe
+
+`config.yaml`'s `tickers:` list (51 entries: the Nifty 50 as of 2026-09-24, plus
+`BSE.NS` added ahead of its officially-confirmed 2026-09-30 index entry — both it and
+`WIPRO.NS`, which is leaving the index that same day, are kept rather than dropping one
+a week early) is the **single source of truth** for every consumer — price/news
+ingestion, sentiment scoring, modeling, and the dashboard's ticker dropdown all read it
+via `get_settings().tickers`. There's no second place to update.
+
+**Index membership drifts over time** (rebalanced roughly semi-annually) — this list is
+a snapshot, not something that stays current automatically. Expect to revisit it
+periodically rather than treating it as permanent.
+
+**Rate-limit budget at 51 tickers**: verified live — a steady-state `refresh`/`news` run
+costs almost exactly 1 NewsAPI request per ticker (the free tier's 100-result cap
+already forces one page per ticker regardless of config), so ~51 requests/run,
+comfortably under both the `max_requests_per_run: 90` safety cap and NewsAPI's 100/day
+account cap **for one run**. That cap resets per invocation, not per day — running a
+full 51-ticker `refresh`/`news` more than once or twice in the same day will exceed the
+account's actual daily quota. Use `--tickers`/`--limit` with a small subset while
+iterating during development; reserve full-universe runs to once or twice a day.
+
+**News relevance at scale — verified, not assumed**: the same manual headline-review
+process that caught the original RELIANCE noise bug (see "News query design" above) was
+re-run against the riskiest-looking new tickers before trusting the expansion. Most held
+up well — `ETERNAL.NS` (Zomato/Blinkit's new legal name, a plain English word),
+`TRENT.NS`, and `TMPV.NS` (the October 2025 Tata Motors passenger-vehicle demerger, a
+name that could plausibly collide with its separately-listed sibling `TMCV.NS`) all came
+back essentially 100% on-topic. Two did not, in ways not predicted in advance:
+- **`BSE.NS`** is the worst case found: roughly 85% of its headlines are generic press
+  use of "BSE" as shorthand for the Bombay Stock Exchange itself (index names like "BSE
+  Information Technology index", unrelated companies' listings on the BSE SME platform,
+  market-holiday notices) rather than anything about BSE Ltd (the company) specifically.
+  Same root cause as the original RELIANCE bug — the bare symbol is OR'd into every
+  query — just a more severe collision, since nearly every Indian markets article
+  mentions "BSE" as the venue.
+- **`ITC.NS`** is a smaller version of the same problem (~30% off-topic): "ITC" collides
+  with "Input Tax Credit" (a routine GST/tax term) and, in press-agency wire content,
+  occasionally the unrelated US "International Trade Commission."
+
+Not fixed here — per-ticker query overrides would need the same care the original
+RELIANCE fix got (iteration + re-verification), and this project's existing domain
+allowlist + `qInTitle` restriction already prevented what would otherwise be far worse.
+Treat `BSE.NS`'s (and to a lesser extent `ITC.NS`'s) sentiment/headline data as
+noisier than the rest of the universe until specifically revisited.
 
 ## Schema
 
@@ -191,7 +241,7 @@ construction. **Models**: logistic regression and XGBoost (per the plan; LSTM is
 explicit stretch goal, not attempted yet — the baselines' results below don't currently
 justify the added complexity). **Validation**: walk-forward only, never a random split —
 an expanding window seeded with 2 years of history, one fold per subsequent calendar
-year, split by date across all 5 pooled tickers at once so no fold's boundary can leak
+year, split by date across all pooled tickers at once so no fold's boundary can leak
 one ticker's future into another's past.
 
 **The sentiment lookahead-bias rule, finally implemented** (flagged back in Phase 1's
@@ -205,26 +255,34 @@ display purposes only, as documented above) — modeling recomputes its own sent
 features from scored headlines directly rather than reusing that table.
 
 **Results** (`python -m market_pred.pipeline train-model`), 7 walk-forward folds
-(2020–2026) over 10,695 pooled rows, averaged:
+(2020–2026) over 106,222 pooled rows (51 tickers), averaged:
 
 | Model | Accuracy | Naive ("always up") | Strategy mean return | Buy-and-hold mean return |
 |---|---|---|---|---|
-| Logistic regression | 49.4% | 50.5% | 0.00013 | 0.00037 |
-| XGBoost | 51.2% | 50.5% | 0.00043 | 0.00037 |
+| Logistic regression | 50.6% | 50.9% | 0.00051 | 0.00085 |
+| XGBoost | 50.5% | 50.9% | 0.00051 | 0.00085 |
 
-XGBoost edges out the naive baseline and buy-and-hold on average, but only marginally —
-consistent with next-day direction from technical indicators alone being a genuinely
-hard, close-to-efficient-market problem, not a sign of a bug. Logistic regression
-doesn't beat naive at all. Neither result accounts for transaction costs or slippage,
-so read the strategy-return edge as illustrative, not a claim that this is tradeable.
+At 10x the pooled data (up from 5 tickers/10,695 rows), both models now land almost
+exactly on the naive baseline — neither shows a real edge. (An earlier run on just 5
+tickers had shown XGBoost slightly ahead of naive; that gap didn't survive scaling up,
+which is itself informative — it was more likely 5-ticker noise than a real effect.)
+This is the expected, credible outcome for next-day direction from technical indicators
+alone on liquid large-caps, not a sign of a bug — see the literature comparison earlier
+in this project's history for context on what a rigorous walk-forward setup on this
+problem typically finds. Neither result accounts for transaction costs or slippage, so
+read the strategy-return figures as illustrative, not a claim that this is tradeable.
 
 **Sentiment ablation** (same price-only vs. price+sentiment features, evaluated on the
-identical small overlap window — 38 train / 14 test rows, 20 unique dates — since
-that's all that currently exists): price-only scored 71.4% accuracy vs. 64.3% with
-sentiment added. Sentiment did not help here, and this specific comparison is not
-strong evidence that it can't — 14 test rows means a single flipped prediction moves
-accuracy by ~7 points. A meaningful answer needs more overlapping history, which only
-accumulates as `refresh` keeps running past NewsAPI's lookback window.
+overlap window where sentiment actually exists): expanding to 51 tickers grew this
+window from 52 rows (38 train / 14 test, 20 dates) to **239 rows (164 train / 75 test,
+22 dates)** — directly realizing one of the intended benefits of the ticker expansion.
+With more data, the result also changed direction: price-only scored 53.3% accuracy vs.
+**56.0% with sentiment added** — a small positive gap, where the earlier 14-test-row
+version had (noisily) shown the opposite. 75 test rows is still a modest sample and this
+is still not strong evidence either way — but it's a more credible small sample than
+before, and the direction is now at least consistent with the project's original
+premise. A firmer answer keeps needing more overlapping history, which only accumulates
+as `refresh` keeps running past NewsAPI's lookback window.
 
 ## Dashboard
 
@@ -257,7 +315,7 @@ streamlit run streamlit_app.py
   covers only the last ~29 days per NewsAPI's free tier, as above) plus a recent-headlines
   table with each one's FinBERT label.
 - **Model prediction** — the persisted price-only XGBoost model's next-session call and
-  confidence, with an expander showing its own walk-forward accuracy (~51.2% vs. ~50.5%
+  confidence, with an expander showing its own walk-forward accuracy (~50.5% vs. ~50.9%
   naive) so a single prediction isn't over-trusted. Deliberately **not** sentiment-fused,
   matching the sentiment ablation finding above — only the price-only model was persisted.
 

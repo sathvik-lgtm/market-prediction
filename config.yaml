@@ -1,14 +1,110 @@
 tickers:
-  - symbol: RELIANCE.NS
-    company: "Reliance Industries"
-  - symbol: TCS.NS
-    company: "Tata Consultancy Services"
+  # Top NSE-listed companies by market cap (Nifty 50 constituents as of 2026-09-24,
+  # plus BSE.NS added ahead of its officially-confirmed 2026-09-30 index entry --
+  # both Wipro and BSE are kept rather than dropping Wipro a week early; yfinance
+  # doesn't care about index membership, only that the symbol is valid).
+  - symbol: ADANIENT.NS
+    company: "Adani Enterprises"
+  - symbol: ADANIPORTS.NS
+    company: "Adani Ports & SEZ"
+  - symbol: APOLLOHOSP.NS
+    company: "Apollo Hospitals"
+  - symbol: ASIANPAINT.NS
+    company: "Asian Paints"
+  - symbol: AXISBANK.NS
+    company: "Axis Bank"
+  - symbol: BAJAJ-AUTO.NS
+    company: "Bajaj Auto"
+  - symbol: BAJFINANCE.NS
+    company: "Bajaj Finance"
+  - symbol: BAJAJFINSV.NS
+    company: "Bajaj Finserv"
+  - symbol: BEL.NS
+    company: "Bharat Electronics"
+  - symbol: BHARTIARTL.NS
+    company: "Bharti Airtel"
+  - symbol: BSE.NS
+    company: "BSE"
+  - symbol: CIPLA.NS
+    company: "Cipla"
+  - symbol: COALINDIA.NS
+    company: "Coal India"
+  - symbol: DRREDDY.NS
+    company: "Dr Reddy's Laboratories"
+  - symbol: EICHERMOT.NS
+    company: "Eicher Motors"
+  - symbol: ETERNAL.NS
+    company: "Eternal"
+  - symbol: GRASIM.NS
+    company: "Grasim Industries"
+  - symbol: HCLTECH.NS
+    company: "HCL Technologies"
   - symbol: HDFCBANK.NS
     company: "HDFC Bank"
-  - symbol: INFY.NS
-    company: "Infosys"
+  - symbol: HDFCLIFE.NS
+    company: "HDFC Life Insurance"
+  - symbol: HINDALCO.NS
+    company: "Hindalco Industries"
+  - symbol: HINDUNILVR.NS
+    company: "Hindustan Unilever"
   - symbol: ICICIBANK.NS
     company: "ICICI Bank"
+  - symbol: ITC.NS
+    company: "ITC"
+  - symbol: INFY.NS
+    company: "Infosys"
+  - symbol: INDIGO.NS
+    company: "IndiGo"
+  - symbol: JSWSTEEL.NS
+    company: "JSW Steel"
+  - symbol: JIOFIN.NS
+    company: "Jio Financial Services"
+  - symbol: KOTAKBANK.NS
+    company: "Kotak Mahindra Bank"
+  - symbol: LT.NS
+    company: "Larsen & Toubro"
+  - symbol: "M&M.NS"
+    company: "Mahindra & Mahindra"
+  - symbol: MARUTI.NS
+    company: "Maruti Suzuki"
+  - symbol: MAXHEALTH.NS
+    company: "Max Healthcare"
+  - symbol: NTPC.NS
+    company: "NTPC"
+  - symbol: NESTLEIND.NS
+    company: "Nestle India"
+  - symbol: ONGC.NS
+    company: "Oil & Natural Gas Corporation"
+  - symbol: POWERGRID.NS
+    company: "Power Grid Corporation"
+  - symbol: RELIANCE.NS
+    company: "Reliance Industries"
+  - symbol: SBILIFE.NS
+    company: "SBI Life Insurance"
+  - symbol: SHRIRAMFIN.NS
+    company: "Shriram Finance"
+  - symbol: SBIN.NS
+    company: "State Bank of India"
+  - symbol: SUNPHARMA.NS
+    company: "Sun Pharma"
+  - symbol: TCS.NS
+    company: "Tata Consultancy Services"
+  - symbol: TATACONSUM.NS
+    company: "Tata Consumer Products"
+  - symbol: TMPV.NS
+    company: "Tata Motors Passenger Vehicles"
+  - symbol: TATASTEEL.NS
+    company: "Tata Steel"
+  - symbol: TECHM.NS
+    company: "Tech Mahindra"
+  - symbol: TITAN.NS
+    company: "Titan Company"
+  - symbol: TRENT.NS
+    company: "Trent"
+  - symbol: ULTRACEMCO.NS
+    company: "UltraTech Cement"
+  - symbol: WIPRO.NS
+    company: "Wipro"
 
 paths:
   db_path: "data/market_pred.db"
