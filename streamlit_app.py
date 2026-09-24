@@ -181,7 +181,7 @@ def render_sentiment_panel(ticker: str) -> None:
             margin=dict(t=20, b=20),
             yaxis_title="Mean sentiment score",
             hovermode="x unified",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=0.82),
         )
         st.plotly_chart(fig)
         st.caption(
