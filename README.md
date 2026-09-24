@@ -3,11 +3,11 @@
 Predicts short-term price direction (up/down) for NSE-listed Indian stocks by combining
 financial news sentiment with historical price/technical data.
 
-**Status: Phase 4 of 5 (Dashboard).** Data acquisition, sentiment scoring, walk-forward-validated
-direction classifiers, and a read-only Streamlit dashboard are all implemented. Only Phase 5
-(write-up) remains.
+**Status: complete (Phases 1-5).** Data acquisition, sentiment scoring, walk-forward-validated
+direction classifiers, and a Streamlit dashboard (with an in-app refresh/retrain button) are
+all implemented and documented end to end.
 
-## Tech stack (Phases 1-4)
+## Tech stack
 
 - Python
 - [`yfinance`](https://pypi.org/project/yfinance/) — historical daily OHLCV price data
@@ -382,8 +382,48 @@ dropdown — both stay in sync via `st.session_state`.
   human-readable "next session" date, a display concern, not a modeling one.
 - A ticker with too little trailing price history (fewer than ~20 trading days) can't
   produce a prediction; the dashboard shows a clean message rather than crashing. Not
-  expected for the 5 configured tickers (8 years of history each), but would apply to
-  a newly added ticker.
+  expected for any of the 51 configured tickers (8 years of history each), but would
+  apply to a newly added ticker.
+
+## What I learned
+
+- **Lookahead bias is easy to get wrong even while actively watching for it.** A naive
+  same-calendar-day join of news to prices looks correct until you actually think through
+  what a model could have known at prediction time. Writing `assign_effective_trading_day()`
+  — a headline only counts toward a day if it landed before that day's 15:30 IST close,
+  else it rolls to the next trading day — took longer to get right than the modeling code
+  around it, which is probably the right amount of relative effort for a finance-ML project.
+- **A fix verified on one example isn't verified.** Early on I fixed a news-search bug for
+  RELIANCE.NS, spot-checked it, and reported it fixed. It wasn't — the same root cause
+  (full-body search matching bare tickers against unrelated articles) was silently
+  polluting every other ticker too, just less visibly. The actual fix (`qInTitle` +
+  a domain allowlist) only came after re-checking *all* tickers, not just the one that
+  prompted the bug report.
+- **A near-50% accuracy isn't a failed model — for next-day direction from technical
+  indicators alone, it's the expected, honest result.** Public markets price in
+  autocorrelated technical signals almost immediately; a model landing right at the naive
+  "always up" baseline is closer to what a genuinely hard, near-efficient-market problem
+  should look like than a suspiciously high number would be. Resisting the urge to
+  over-fit toward a better-looking headline number was itself part of the exercise.
+- **Small samples reverse conclusions.** The price+sentiment vs. price-only ablation
+  flipped direction between the 5-ticker pilot (52 rows) and the 51-ticker expansion (239
+  rows) — sentiment looked worse, then better, on the same methodology. Neither number
+  alone was trustworthy; only having both, with sample sizes stated plainly, is.
+- **Predicting future noise is a coin flip; measuring it isn't.** Before expanding to 51
+  tickers I guessed which ones would produce noisy news matches (recent renames/demergers
+  like ETERNAL.NS, TRENT.NS). All came back clean. The actual noise was in tickers I hadn't
+  flagged — BSE.NS (the exchange's own name) and ITC.NS (collides with "Input Tax Credit")
+  — found only by reading the actual headlines, not by reasoning about it in advance.
+- **Free-tier API constraints aren't edge cases to handle later — they shape the whole
+  pipeline's design.** NewsAPI's ~29-day lookback, 100-result-per-query cap, and 100
+  requests/day meant incremental fetching, a real error-message-driven retry (rather than
+  a hardcoded lookback guess), and a request budget cap all had to be designed in from the
+  start, not bolted on after something broke in production.
+- **A library's convenience wrapper can fail in ways its own docs don't emphasize.**
+  XGBoost's sklearn API validates the input DataFrame's column *order* against the fitted
+  model and raises rather than realigning by name — found by testing against the actual
+  persisted model during planning, not by reading the docs, and worth a permanent
+  regression test once found rather than trusting it wouldn't regress silently.
 
 ## Running tests
 
