@@ -387,43 +387,42 @@ dropdown — both stay in sync via `st.session_state`.
 
 ## What I learned
 
-- **Lookahead bias is easy to get wrong even while actively watching for it.** A naive
-  same-calendar-day join of news to prices looks correct until you actually think through
-  what a model could have known at prediction time. Writing `assign_effective_trading_day()`
-  — a headline only counts toward a day if it landed before that day's 15:30 IST close,
-  else it rolls to the next trading day — took longer to get right than the modeling code
-  around it, which is probably the right amount of relative effort for a finance-ML project.
-- **A fix verified on one example isn't verified.** Early on I fixed a news-search bug for
-  RELIANCE.NS, spot-checked it, and reported it fixed. It wasn't — the same root cause
-  (full-body search matching bare tickers against unrelated articles) was silently
-  polluting every other ticker too, just less visibly. The actual fix (`qInTitle` +
-  a domain allowlist) only came after re-checking *all* tickers, not just the one that
-  prompted the bug report.
-- **A near-50% accuracy isn't a failed model — for next-day direction from technical
-  indicators alone, it's the expected, honest result.** Public markets price in
-  autocorrelated technical signals almost immediately; a model landing right at the naive
-  "always up" baseline is closer to what a genuinely hard, near-efficient-market problem
-  should look like than a suspiciously high number would be. Resisting the urge to
-  over-fit toward a better-looking headline number was itself part of the exercise.
-- **Small samples reverse conclusions.** The price+sentiment vs. price-only ablation
-  flipped direction between the 5-ticker pilot (52 rows) and the 51-ticker expansion (239
-  rows) — sentiment looked worse, then better, on the same methodology. Neither number
-  alone was trustworthy; only having both, with sample sizes stated plainly, is.
-- **Predicting future noise is a coin flip; measuring it isn't.** Before expanding to 51
-  tickers I guessed which ones would produce noisy news matches (recent renames/demergers
-  like ETERNAL.NS, TRENT.NS). All came back clean. The actual noise was in tickers I hadn't
-  flagged — BSE.NS (the exchange's own name) and ITC.NS (collides with "Input Tax Credit")
-  — found only by reading the actual headlines, not by reasoning about it in advance.
-- **Free-tier API constraints aren't edge cases to handle later — they shape the whole
-  pipeline's design.** NewsAPI's ~29-day lookback, 100-result-per-query cap, and 100
-  requests/day meant incremental fetching, a real error-message-driven retry (rather than
-  a hardcoded lookback guess), and a request budget cap all had to be designed in from the
-  start, not bolted on after something broke in production.
-- **A library's convenience wrapper can fail in ways its own docs don't emphasize.**
-  XGBoost's sklearn API validates the input DataFrame's column *order* against the fitted
-  model and raises rather than realigning by name — found by testing against the actual
-  persisted model during planning, not by reading the docs, and worth a permanent
-  regression test once found rather than trusting it wouldn't regress silently.
+A few things from this project stuck with me more than the rest:
+
+- Lookahead bias sounds obvious in theory but is easy to mess up in practice. I assumed
+  joining news to prices by calendar day would be fine — it isn't, since a headline
+  published at 4pm didn't exist yet when the market closed. Writing
+  `assign_effective_trading_day()` (roll a headline forward to the next trading day if it
+  landed after that day's 15:30 IST close) ended up taking longer than the actual model
+  code, which in hindsight is probably the right amount of effort to spend on it.
+- Testing on one example isn't really testing. I "fixed" a news-search bug for
+  RELIANCE.NS, skimmed a few headlines, and called it done. It wasn't — the same bug
+  (matching bare tickers against unrelated articles) was quietly polluting every other
+  ticker too, just less obviously. I only caught the real scope of it after going back
+  and reading headlines for every ticker, not just the one that got flagged.
+- Landing around 50% accuracy isn't the model failing — for next-day direction from
+  technical indicators alone, that's honestly the believable outcome. If it had come back
+  much higher I'd have trusted it a lot less. Resisting the urge to tune toward a
+  better-looking number was part of the point.
+- Small sample sizes can flip your conclusions completely. The sentiment-vs-no-sentiment
+  comparison actually reversed between the 5-ticker version (52 rows) and the 51-ticker
+  version (239 rows) — same method, opposite-looking result. Now I don't trust any single
+  number in this project without checking how much data it's sitting on.
+- I'm apparently not great at predicting where the next bug will come from. Before
+  expanding to 51 tickers I figured recently-renamed companies like ETERNAL.NS or
+  TRENT.NS would cause news-matching problems. They were fine. The real offenders —
+  BSE.NS and ITC.NS — weren't even on my radar, because "BSE" is just how people refer to
+  the exchange itself and "ITC" gets used for Input Tax Credit constantly. Only found
+  this by actually reading the headlines, not by guessing in advance.
+- Free API tiers aren't something you patch around after the fact, they shape the whole
+  design from day one. NewsAPI's 100 requests/day and ~29-day lookback meant the
+  ingestion pipeline had to be incremental and quota-aware from the start, not something
+  bolted on after it broke once.
+- Libraries fail in ways their docs don't always warn you about. XGBoost's sklearn
+  wrapper checks that your DataFrame's columns are in the exact order it was trained on
+  and just raises if not — it doesn't quietly realign by column name like I assumed it
+  would. Found that one by testing against the actual saved model, not by reading the API
+  reference, and it's now a permanent regression test so it can't sneak back in.
 
 ## Running tests
 
