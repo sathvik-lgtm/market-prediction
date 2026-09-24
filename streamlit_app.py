@@ -14,11 +14,12 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from market_pred.config import get_settings
+from market_pred.config import Settings, get_settings
 from market_pred.db.access import (
     get_daily_sentiment,
     get_last_news_date,
     get_last_price_date,
+    get_latest_daily_changes,
     get_news_for_ticker,
     get_price_history,
 )
@@ -86,6 +87,41 @@ def _load_freshness(ticker: str) -> tuple[str | None, str | None]:
         last_price.isoformat() if last_price else None,
         last_news.strftime("%Y-%m-%d") if last_news else None,
     )
+
+
+@st.cache_data
+def _load_daily_changes() -> pd.DataFrame:
+    settings = get_settings()
+    with get_connection(settings.db_path) as conn:
+        return get_latest_daily_changes(conn)
+
+
+def render_top_movers(settings: Settings) -> None:
+    st.subheader("Top Movers")
+    changes = _load_daily_changes()
+    if changes.empty:
+        st.caption("Not enough price history yet.")
+        return
+
+    company_by_symbol = {t.symbol: t.company for t in settings.tickers}
+    changes = changes[changes["ticker"].isin(company_by_symbol)].copy()
+    changes["company"] = changes["ticker"].map(company_by_symbol)
+
+    direction = st.segmented_control(
+        "Filter", ["Gainers", "Losers"], default="Gainers", required=True, key="movers_filter"
+    )
+    top = changes.sort_values("pct_change", ascending=(direction == "Losers")).head(15)
+
+    for row in top.itertuples():
+        arrow = "▲" if row.pct_change >= 0 else "▼"
+        swatch = "green" if row.pct_change >= 0 else "red"
+        name_col, pct_col = st.columns([5, 2])
+        with name_col:
+            if st.button(row.company, key=f"mover_{row.ticker}", width="stretch"):
+                st.session_state["ticker_symbol"] = row.ticker
+                st.rerun()
+        with pct_col:
+            st.markdown(f":{swatch}[{arrow}{row.pct_change:+.1f}%]")
 
 
 def render_price_panel(ticker: str) -> None:
@@ -203,8 +239,8 @@ def render_prediction_panel(ticker: str, settings) -> None:
             col1.metric("XGBoost accuracy (walk-forward)", f"{summary['accuracy']:.1%}")
             col2.metric("Naive \"always up\" baseline", f"{summary['naive_always_up_accuracy']:.1%}")
             st.caption(
-                "7 expanding-window folds, 2020-2026, pooled across all 5 tickers. A small, "
-                "honest edge -- not a reliable trading signal. \"Down\" includes flat/zero-return days."
+                "7 expanding-window folds, 2020-2026, pooled across all configured tickers. A "
+                "small, honest edge -- not a reliable trading signal. \"Down\" includes flat/zero-return days."
             )
 
 
@@ -221,20 +257,31 @@ def main() -> None:
 
     st.title("📈 NSE Market Sentiment + Direction Predictor")
 
+    symbols = [t.symbol for t in settings.tickers]
+    if st.session_state.get("ticker_symbol") not in symbols:
+        st.session_state["ticker_symbol"] = symbols[0]
+
     with st.sidebar:
         st.header("Settings")
+        current_index = symbols.index(st.session_state["ticker_symbol"])
         ticker_info = st.selectbox(
-            "Ticker", settings.tickers, format_func=lambda t: f"{t.company} ({t.symbol})"
+            "Ticker", settings.tickers, index=current_index,
+            format_func=lambda t: f"{t.company} ({t.symbol})",
         )
-        ticker = ticker_info.symbol
+        st.session_state["ticker_symbol"] = ticker_info.symbol
 
-        last_price_date, last_news_date = _load_freshness(ticker)
+        last_price_date, last_news_date = _load_freshness(st.session_state["ticker_symbol"])
         st.caption(f"Prices through {last_price_date or '—'} · News through {last_news_date or '—'}")
 
         if st.button("🔄 Clear cache"):
             st.cache_data.clear()
             st.cache_resource.clear()
             st.rerun()
+
+        st.divider()
+        render_top_movers(settings)
+
+    ticker = st.session_state["ticker_symbol"]
 
     render_price_panel(ticker)
     st.divider()

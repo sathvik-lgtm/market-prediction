@@ -97,6 +97,34 @@ def get_price_history(
     return pd.read_sql_query(query, conn, params=params)
 
 
+def get_latest_daily_changes(conn: sqlite3.Connection) -> pd.DataFrame:
+    """Each ticker's most recent day's close vs. the day before, for every
+    ticker with at least 2 price rows -- one query across all tickers (via a
+    window function) rather than N per-ticker round trips, for a sidebar
+    "top movers" widget. Columns: ticker, date, close, prev_close, pct_change
+    (0-100 scale, e.g. 3.25 for +3.25%). A ticker with only 1 day of history
+    has no prev_close to compare against and is excluded, not NaN-filled.
+    """
+    query = """
+        WITH ranked AS (
+            SELECT
+                ticker, date, close,
+                LAG(close) OVER (PARTITION BY ticker ORDER BY date) AS prev_close,
+                ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) AS rn
+            FROM prices
+        )
+        SELECT ticker, date, close, prev_close
+        FROM ranked
+        WHERE rn = 1 AND prev_close IS NOT NULL
+    """
+    df = pd.read_sql_query(query, conn)
+    if df.empty:
+        df["pct_change"] = pd.Series(dtype=float)
+        return df
+    df["pct_change"] = (df["close"] - df["prev_close"]) / df["prev_close"] * 100
+    return df
+
+
 def insert_news_articles(conn: sqlite3.Connection, articles: list["NormalizedArticle"]) -> int:
     """Insert normalized articles, silently skipping duplicates on (ticker, url).
 

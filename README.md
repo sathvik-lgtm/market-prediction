@@ -308,7 +308,17 @@ python -m market_pred.pipeline train-model
 streamlit run streamlit_app.py
 ```
 
-**What each panel shows**, selecting a ticker from the sidebar:
+**Selecting a ticker**: either the sidebar dropdown (any configured ticker) or the
+**Top Movers** list below it — the 15 biggest gainers or losers by the most recent
+day's % close-to-close change (toggle via the Gainers/Losers filter), each showing its
+% change next to its name. Computed live from `prices` (one query across every ticker,
+via `get_latest_daily_changes`), so it's never a stale/precomputed snapshot — it reflects
+whatever's currently in the DB and updates automatically whenever that changes (rerun
+`prices`/`refresh`, then use "Clear cache" so the dashboard picks it up without a
+restart). Clicking an entry sets it as the active ticker, same as picking it from the
+dropdown — both stay in sync via `st.session_state`.
+
+**What each panel shows**, once a ticker is selected:
 - **Price** — candlestick chart (split/dividend-adjusted close), defaulting to the last
   ~6 months with the full history reachable via the range slider.
 - **News sentiment trend** — `daily_sentiment`'s calendar-day aggregate (naturally

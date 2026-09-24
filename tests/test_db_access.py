@@ -7,6 +7,7 @@ from market_pred.db.access import (
     get_daily_sentiment,
     get_last_news_date,
     get_last_price_date,
+    get_latest_daily_changes,
     get_news_for_ticker,
     get_price_history,
     get_unscored_news,
@@ -56,6 +57,42 @@ def test_get_last_price_date(db_conn):
     ])
     upsert_prices(db_conn, df, "TEST.NS")
     assert get_last_price_date(db_conn, "TEST.NS") == date(2024, 1, 5)
+
+
+def test_get_latest_daily_changes_computes_pct_change_per_ticker(db_conn):
+    upsert_prices(db_conn, make_price_df([
+        {"date": "2024-01-01", "open": 1, "high": 1, "low": 1, "close": 100.0, "volume": 1, "fetched_at": "x"},
+        {"date": "2024-01-02", "open": 1, "high": 1, "low": 1, "close": 103.0, "volume": 1, "fetched_at": "x"},
+    ]), "GAINER.NS")
+    upsert_prices(db_conn, make_price_df([
+        {"date": "2024-01-01", "open": 1, "high": 1, "low": 1, "close": 50.0, "volume": 1, "fetched_at": "x"},
+        {"date": "2024-01-02", "open": 1, "high": 1, "low": 1, "close": 45.0, "volume": 1, "fetched_at": "x"},
+    ]), "LOSER.NS")
+
+    df = get_latest_daily_changes(db_conn)
+
+    assert set(df["ticker"]) == {"GAINER.NS", "LOSER.NS"}
+    gainer = df[df["ticker"] == "GAINER.NS"].iloc[0]
+    loser = df[df["ticker"] == "LOSER.NS"].iloc[0]
+    assert gainer["date"] == "2024-01-02"
+    assert gainer["pct_change"] == pytest.approx(3.0)
+    assert loser["pct_change"] == pytest.approx(-10.0)
+
+
+def test_get_latest_daily_changes_excludes_ticker_with_only_one_day(db_conn):
+    upsert_prices(db_conn, make_price_df([
+        {"date": "2024-01-01", "open": 1, "high": 1, "low": 1, "close": 100.0, "volume": 1, "fetched_at": "x"},
+    ]), "NEWLISTING.NS")
+
+    df = get_latest_daily_changes(db_conn)
+
+    assert "NEWLISTING.NS" not in set(df["ticker"])
+
+
+def test_get_latest_daily_changes_empty_when_no_prices(db_conn):
+    df = get_latest_daily_changes(db_conn)
+    assert df.empty
+    assert "pct_change" in df.columns
 
 
 def make_article(url="https://example.com/a", ticker="TEST.NS", published="2024-01-02T10:00:00Z"):
