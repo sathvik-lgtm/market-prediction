@@ -7,6 +7,10 @@ financial news sentiment with historical price/technical data.
 direction classifiers, and a Streamlit dashboard (with an in-app refresh/retrain button) are
 all implemented and documented end to end.
 
+> This is a living project — all 5 planned phases are done, but I'll keep coming back to
+> improve it (more tickers, better sentiment coverage, a stronger model) as I learn more.
+> See [Known limitations](#known-limitations) for what's on my radar next.
+
 ## Tech stack
 
 - Python
